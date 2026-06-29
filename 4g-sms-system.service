@@ -1,0 +1,32 @@
+[Unit]
+Description=4G SMS Forward System
+After=network.target multi-user.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/4g-sms-system
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+ExecStart=/usr/bin/python3 /opt/4g-sms-system/app.py
+ExecStop=/bin/kill -TERM $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=4g-sms
+
+# 安全加固
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/4g-sms-system/data /opt/4g-sms-system/config
+ReadOnlyPaths=/opt/4g-sms-system
+
+# 资源限制
+MemoryLimit=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

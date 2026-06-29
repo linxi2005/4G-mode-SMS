@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}数据库维护 - {{ app_name }}{% endblock %}
+{% block page_title %}<h5 class="mb-0"><i class="fas fa-database"></i> 数据库维护</h5>{% endblock %}
+{% block content %}
+
+<div class="row g-3">
+    <div class="col-md-4">
+        <div class="card stat-card">
+            <div class="value text-primary">{{ db_size }}</div>
+            <div class="label"><i class="fas fa-hdd"></i> 数据库大小</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card">
+            <div class="value text-success">{{ counts.sms }}</div>
+            <div class="label"><i class="fas fa-sms"></i> 短信总数</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card">
+            <div class="value text-info">{{ mail_stats.success }}/{{ mail_stats.total }}</div>
+            <div class="label"><i class="fas fa-envelope"></i> 邮件发送成功/总数</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mt-3">
+    <div class="col-md-6">
+        <div class="card p-4">
+            <h5 class="mb-3"><i class="fas fa-table"></i> 数据表统计</h5>
+            <table class="table table-sm">
+                <tr><td>短信记录</td><td><strong>{{ counts.sms }}</strong></td></tr>
+                <tr><td>模块信息</td><td><strong>{{ counts.modem }}</strong></td></tr>
+                <tr><td>邮件日志</td><td><strong>{{ counts.mail_log }}</strong></td></tr>
+                <tr><td>AT历史</td><td><strong>{{ counts.at_history }}</strong></td></tr>
+                <tr><td>系统日志</td><td><strong>{{ counts.system_log }}</strong></td></tr>
+            </table>
+            <div class="mt-2">
+                <span class="badge {% if integrity %}bg-success{% else %}bg-danger{% endif %}">
+                    <i class="fas {% if integrity %}fa-check-circle{% else %}fa-exclamation-triangle{% endif %}"></i>
+                    完整性: {% if integrity %}正常{% else %}异常{% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card p-4">
+            <h5 class="mb-3"><i class="fas fa-tools"></i> 维护操作</h5>
+
+            <div class="d-grid gap-2">
+                <button class="btn btn-outline-info" onclick="vacuumDB()">
+                    <i class="fas fa-broom"></i> 数据库优化 (VACUUM)
+                </button>
+                <button class="btn btn-outline-warning" onclick="checkIntegrity()">
+                    <i class="fas fa-check-double"></i> 完整性检查
+                </button>
+                <button class="btn btn-outline-success" onclick="backupDB()">
+                    <i class="fas fa-copy"></i> 一键备份
+                </button>
+            </div>
+
+            <hr>
+
+            <h6><i class="fas fa-trash-alt"></i> 数据清理</h6>
+            <div class="row g-2 mb-2">
+                <div class="col-6">
+                    <label class="form-label small">删除超过(天)</label>
+                    <input class="form-control form-control-sm" type="number" id="cleanupDays" value="30" min="1">
+                </div>
+                <div class="col-6 d-flex align-items-end">
+                    <button class="btn btn-outline-danger btn-sm w-100" onclick="cleanupByDays()">
+                        <i class="fas fa-trash"></i> 按天数清理
+                    </button>
+                </div>
+            </div>
+            <div class="row g-2">
+                <div class="col-6">
+                    <label class="form-label small">最多保留(条)</label>
+                    <input class="form-control form-control-sm" type="number" id="cleanupMax" value="100000">
+                </div>
+                <div class="col-6 d-flex align-items-end">
+                    <button class="btn btn-outline-danger btn-sm w-100" onclick="cleanupByCount()">
+                        <i class="fas fa-trash"></i> 按数量清理
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+{% block extra_scripts %}
+<script>
+async function vacuumDB() {
+    showToast('正在优化数据库...', 'info');
+    const resp = await fetch('/api/database/vacuum', {method:'POST'});
+    const data = await resp.json();
+    showToast(data.success ? '数据库优化完成' : '优化失败', data.success?'success':'error');
+    if (data.success) setTimeout(() => location.reload(), 1000);
+}
+
+async function checkIntegrity() {
+    const resp = await fetch('/api/database/check', {method:'POST'});
+    const data = await resp.json();
+    showToast(data.integrity ? '数据库完整性: 正常' : '数据库完整性: 异常!', data.integrity?'success':'error');
+}
+
+async function backupDB() {
+    showToast('正在备份...', 'info');
+    const resp = await fetch('/api/database/backup', {method:'POST'});
+    const data = await resp.json();
+    showToast(data.success ? `备份完成: ${data.path}` : '备份失败', data.success?'success':'error');
+}
+
+async function cleanupByDays() {
+    const days = document.getElementById('cleanupDays').value;
+    if (!confirm(`确定要删除 ${days} 天前的短信吗？`)) return;
+    const resp = await fetch('/api/database/cleanup', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({days: parseInt(days)})
+    });
+    const data = await resp.json();
+    showToast(data.success ? `已删除 ${data.deleted} 条短信` : '清理失败', data.success?'success':'error');
+    if (data.success) setTimeout(() => location.reload(), 1000);
+}
+
+async function cleanupByCount() {
+    const max = document.getElementById('cleanupMax').value;
+    if (!confirm(`确定只保留最新的 ${max} 条短信吗？`)) return;
+    const resp = await fetch('/api/database/cleanup', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({max_count: parseInt(max)})
+    });
+    const data = await resp.json();
+    showToast(data.success ? `已删除 ${data.deleted} 条短信` : '清理失败', data.success?'success':'error');
+    if (data.success) setTimeout(() => location.reload(), 1000);
+}
+</script>
+{% endblock %}

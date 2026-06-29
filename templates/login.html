@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - {{ app_name }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #1e3a5f 0%, #15294a 50%, #0d1b2a 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            background: #fff;
+            border-radius: 16px;
+            padding: 40px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .login-card .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .login-card .logo i {
+            font-size: 3rem;
+            color: #1e3a5f;
+        }
+        .login-card h3 {
+            color: #333;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="logo">
+            <i class="fas fa-satellite-dish"></i>
+            <h3 class="mt-2">4G 短信转发系统</h3>
+            <p class="text-muted">请登录以继续</p>
+        </div>
+        {% if error %}
+        <div class="alert alert-danger alert-dismissible fade show">
+            <i class="fas fa-exclamation-circle"></i> {{ error }}
+            <button class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endif %}
+        <form method="POST">
+            <div class="mb-3">
+                <label class="form-label">
+                    <i class="fas fa-user"></i> 用户名
+                </label>
+                <input type="text" name="username" class="form-control" placeholder="输入用户名" required autofocus>
+            </div>
+            <div class="mb-4">
+                <label class="form-label">
+                    <i class="fas fa-lock"></i> 密码
+                </label>
+                <input type="password" name="password" class="form-control" placeholder="输入密码" required>
+            </div>
+            <button type="submit" class="btn btn-primary w-100 py-2">
+                <i class="fas fa-sign-in-alt"></i> 登 录
+            </button>
+        </form>
+        <p class="text-center text-muted mt-3" style="font-size:0.8rem;">
+            默认账户: admin / admin
+        </p>
+    </div>
+</body>
+</html>

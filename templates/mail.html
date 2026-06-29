@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}邮件配置 - {{ app_name }}{% endblock %}
+{% block page_title %}<h5 class="mb-0"><i class="fas fa-envelope"></i> 邮件转发配置</h5>{% endblock %}
+{% block content %}
+
+<div class="row g-3">
+    <div class="col-md-6">
+        <div class="card p-4">
+            <h5 class="mb-3"><i class="fas fa-cog"></i> SMTP 设置</h5>
+            <div class="mb-3 form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="mailEnabled" {% if config.enabled %}checked{% endif %}>
+                <label class="form-check-label">启用邮件转发</label>
+            </div>
+            <div class="mb-2">
+                <label class="form-label small">SMTP服务器</label>
+                <input class="form-control form-control-sm" id="smtpServer" value="{{ config.smtp_server }}">
+            </div>
+            <div class="row g-2 mb-2">
+                <div class="col-6">
+                    <label class="form-label small">端口</label>
+                    <input class="form-control form-control-sm" type="number" id="smtpPort" value="{{ config.smtp_port }}">
+                </div>
+                <div class="col-6 d-flex align-items-end gap-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="useTLS" {% if config.use_tls %}checked{% endif %}>
+                        <label class="form-check-label small">TLS</label>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="useSSL" {% if config.use_ssl %}checked{% endif %}>
+                        <label class="form-check-label small">SSL</label>
+                    </div>
+                </div>
+            </div>
+            <div class="mb-2">
+                <label class="form-label small">用户名</label>
+                <input class="form-control form-control-sm" id="smtpUser" value="{{ config.username }}">
+            </div>
+            <div class="mb-2">
+                <label class="form-label small">密码</label>
+                <input class="form-control form-control-sm" type="password" id="smtpPass" value="{{ config.password }}" placeholder="SMTP密码/授权码">
+            </div>
+            <div class="mb-2">
+                <label class="form-label small">发件邮箱</label>
+                <input class="form-control form-control-sm" id="fromEmail" value="{{ config.from_email }}">
+            </div>
+            <div class="mb-2">
+                <label class="form-label small">发件人名称</label>
+                <input class="form-control form-control-sm" id="senderName" value="{{ config.sender_name }}">
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card p-4 h-100">
+            <h5 class="mb-3"><i class="fas fa-users"></i> 收件人</h5>
+            <div class="mb-3">
+                <textarea class="form-control form-control-sm" id="recipients" rows="4" placeholder="每行一个邮箱地址">{% for r in config.recipients %}{{ r }}
+{% endfor %}</textarea>
+                <small class="text-muted">每行一个邮箱地址</small>
+            </div>
+
+            <h5 class="mb-3"><i class="fas fa-pen"></i> 邮件模板</h5>
+            <div class="mb-2">
+                <label class="form-label small">邮件标题</label>
+                <input class="form-control form-control-sm" id="subjectTemplate" value="{{ config.subject_template }}">
+            </div>
+            <div class="mb-2">
+                <label class="form-label small">邮件正文 (HTML)</label>
+                <textarea class="form-control form-control-sm" id="bodyTemplate" rows="8">{{ config.body_template }}</textarea>
+            </div>
+            <div class="mb-2">
+                <small class="text-muted">支持的变量: {{ "{{phone}}" }}, {{ "{{content}}" }}, {{ "{{time}}" }}, {{ "{{imei}}" }}, {{ "{{carrier}}" }}, {{ "{{operator}}" }}, {{ "{{signal}}" }}, {{ "{{module_name}}" }}, {{ "{{module_port}}" }}, {{ "{{module_model}}" }}</small>
+            </div>
+
+            <div class="d-flex gap-2 mt-3">
+                <button class="btn btn-primary" onclick="saveMailConfig()"><i class="fas fa-save"></i> 保存配置</button>
+                <button class="btn btn-outline-info" onclick="testMail()"><i class="fas fa-paper-plane"></i> 测试发送</button>
+            </div>
+            <div id="mailResult" class="mt-2"></div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+{% block extra_scripts %}
+<script>
+async function saveMailConfig() {
+    const config = {
+        enabled: document.getElementById('mailEnabled').checked,
+        smtp_server: document.getElementById('smtpServer').value,
+        smtp_port: parseInt(document.getElementById('smtpPort').value),
+        use_tls: document.getElementById('useTLS').checked,
+        use_ssl: document.getElementById('useSSL').checked,
+        username: document.getElementById('smtpUser').value,
+        password: document.getElementById('smtpPass').value,
+        from_email: document.getElementById('fromEmail').value,
+        sender_name: document.getElementById('senderName').value,
+        recipients: document.getElementById('recipients').value.split('\n').map(s=>s.trim()).filter(s=>s),
+        subject_template: document.getElementById('subjectTemplate').value,
+        body_template: document.getElementById('bodyTemplate').value,
+    };
+
+    const resp = await fetch('/api/mail', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(config)
+    });
+    const data = await resp.json();
+    showToast(data.success ? '配置已保存' : '保存失败', data.success?'success':'error');
+}
+
+async function testMail() {
+    const resultDiv = document.getElementById('mailResult');
+    resultDiv.innerHTML = '<div class="text-info"><i class="fas fa-spinner fa-spin"></i> 正在发送测试邮件...</div>';
+
+    const resp = await fetch('/api/mail/test', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const data = await resp.json();
+    if (data.success) {
+        resultDiv.innerHTML = '<div class="alert alert-success"><i class="fas fa-check-circle"></i> 测试邮件发送成功!</div>';
+    } else {
+        resultDiv.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-circle"></i> 发送失败: ${data.error}</div>`;
+    }
+}
+</script>
+{% endblock %}

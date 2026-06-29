@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}发送短信 - {{ app_name }}{% endblock %}
+{% block page_title %}<h5 class="mb-0"><i class="fas fa-paper-plane"></i> 发送短信</h5>{% endblock %}
+{% block content %}
+<div class="row g-3">
+    <div class="col-md-6">
+        <div class="card p-4">
+            <h5 class="mb-3"><i class="fas fa-edit"></i> 编写短信</h5>
+            <div class="mb-3">
+                <label class="form-label">选择模块</label>
+                <select class="form-select" id="sendModule">
+                    <option value="">-- 选择模块 --</option>
+                    {% for mid, m in modems.items() %}
+                    {% if m.is_online %}
+                    <option value="{{ mid }}">{{ m.name }} ({{ m.port }}) - {{ m.info.get('operator','') }}</option>
+                    {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">目标号码</label>
+                <input type="text" class="form-control" id="sendPhone" placeholder="+8613812345678">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">短信内容</label>
+                <textarea class="form-control" id="sendContent" rows="4" placeholder="输入短信内容..." maxlength="500"></textarea>
+                <small class="text-muted"><span id="charCount">0</span>/500 字符</small>
+            </div>
+            <button class="btn btn-primary w-100" onclick="sendSMS()">
+                <i class="fas fa-paper-plane"></i> 发送
+            </button>
+            <div id="sendResult" class="mt-3"></div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card p-4">
+            <h5 class="mb-3"><i class="fas fa-history"></i> 发送历史</h5>
+            <div class="text-center text-muted py-5">
+                <i class="fas fa-clock fa-3x mb-2"></i>
+                <p>发送记录将显示在这里</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+document.getElementById('sendContent').addEventListener('input', function() {
+    document.getElementById('charCount').textContent = this.value.length;
+});
+
+async function sendSMS() {
+    const moduleId = document.getElementById('sendModule').value;
+    const phone = document.getElementById('sendPhone').value.trim();
+    const content = document.getElementById('sendContent').value.trim();
+
+    if (!moduleId) { showToast('请选择模块', 'warning'); return; }
+    if (!phone) { showToast('请输入目标号码', 'warning'); return; }
+    if (!content) { showToast('请输入短信内容', 'warning'); return; }
+
+    const btn = event.target;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 发送中...';
+
+    const resp = await fetch('/api/send', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({module_id: moduleId, phone, content})
+    });
+    const data = await resp.json();
+
+    const resultDiv = document.getElementById('sendResult');
+    if (data.success) {
+        resultDiv.innerHTML = '<div class="alert alert-success"><i class="fas fa-check-circle"></i> 短信发送成功!</div>';
+        document.getElementById('sendContent').value = '';
+        document.getElementById('charCount').textContent = '0';
+    } else {
+        resultDiv.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-circle"></i> 发送失败: ${data.error || '未知错误'}</div>`;
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-paper-plane"></i> 发送';
+}
+</script>
+{% endblock %}

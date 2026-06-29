@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}系统日志 - {{ app_name }}{% endblock %}
+{% block page_title %}<h5 class="mb-0"><i class="fas fa-list-alt"></i> 系统日志</h5>{% endblock %}
+{% block content %}
+
+<div class="card p-3 mb-3">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-2">
+            <label class="form-label small">日志级别</label>
+            <select class="form-select form-select-sm" id="logLevelFilter">
+                <option value="">全部</option>
+                <option value="INFO">INFO</option>
+                <option value="WARNING">WARNING</option>
+                <option value="ERROR">ERROR</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small">搜索</label>
+            <input class="form-control form-control-sm" id="logSearch" placeholder="关键词...">
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-primary btn-sm w-100" onclick="loadLogs()"><i class="fas fa-search"></i> 查询</button>
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-outline-danger btn-sm w-100" onclick="clearLogs()"><i class="fas fa-trash"></i> 清空日志</button>
+        </div>
+        <div class="col-md-2">
+            <a href="/api/logs/download" class="btn btn-outline-info btn-sm w-100"><i class="fas fa-download"></i> 下载日志</a>
+        </div>
+    </div>
+</div>
+
+<div class="table-container">
+    <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+            <thead>
+                <tr><th style="width:140px">时间</th><th style="width:70px">级别</th><th>模块</th><th>消息</th></tr>
+            </thead>
+            <tbody id="logTableBody"></tbody>
+        </table>
+    </div>
+    <nav class="mt-3"><ul class="pagination pagination-sm justify-content-center" id="logPagination"></ul></nav>
+</div>
+
+{% endblock %}
+{% block extra_scripts %}
+<script>
+function loadLogs(page = 1) {
+    const params = new URLSearchParams({
+        page, per_page: 50,
+        level: document.getElementById('logLevelFilter').value,
+        search: document.getElementById('logSearch').value,
+    });
+
+    fetch('/api/logs?' + params).then(r => r.json()).then(data => {
+        const tbody = document.getElementById('logTableBody');
+        if (data.items.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">暂无日志</td></tr>';
+        } else {
+            tbody.innerHTML = data.items.map(l => {
+                const levelColor = l.level === 'ERROR' ? 'text-danger' :
+                                   l.level === 'WARNING' ? 'text-warning' :
+                                   l.level === 'INFO' ? 'text-info' : '';
+                return `<tr>
+                    <td style="font-size:0.8rem;white-space:nowrap">${formatDate(l.created_at)}</td>
+                    <td><span class="${levelColor} fw-bold">${l.level}</span></td>
+                    <td>${l.module || '-'}</td>
+                    <td style="word-break:break-all">${l.message}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        const pag = document.getElementById('logPagination');
+        let html = '';
+        for (let i = 1; i <= data.pages; i++) {
+            html += `<li class="page-item ${i===page?'active':''}"><a class="page-link" href="#" onclick="loadLogs(${i})">${i}</a></li>`;
+        }
+        pag.innerHTML = html;
+    });
+}
+
+async function clearLogs() {
+    if (!confirm('确定要清空所有日志吗？')) return;
+    const resp = await fetch('/api/logs/clear', {method:'POST'});
+    const data = await resp.json();
+    showToast(data.success ? '日志已清空' : '清空失败', data.success?'success':'error');
+    if (data.success) loadLogs();
+}
+
+loadLogs();
+</script>
+{% endblock %}

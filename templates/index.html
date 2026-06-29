@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}首页 - {{ app_name }}{% endblock %}
+{% block page_title %}<h5 class="mb-0"><i class="fas fa-tachometer-alt"></i> 仪表盘</h5>{% endblock %}
+{% block content %}
+
+<!-- 统计卡片 -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card stat-card">
+            <div class="value text-primary">{{ sms_stats.today_received }}</div>
+            <div class="label"><i class="fas fa-inbox"></i> 今日收到</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card stat-card">
+            <div class="value text-success">{{ sms_stats.today_forwarded }}</div>
+            <div class="label"><i class="fas fa-check-circle"></i> 已转发</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card stat-card">
+            <div class="value text-warning">{{ modem_stats.online }}</div>
+            <div class="label"><i class="fas fa-microchip"></i> 在线模块</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card stat-card">
+            <div class="value text-info">{{ stats.cpu }}%</div>
+            <div class="label"><i class="fas fa-server"></i> CPU</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <!-- 系统信息 -->
+    <div class="col-md-4">
+        <div class="card p-3 h-100">
+            <h6 class="mb-3"><i class="fas fa-info-circle"></i> 系统信息</h6>
+            <table class="table table-sm mb-0">
+                <tr><td class="text-muted">版本</td><td>{{ stats.version }}</td></tr>
+                <tr><td class="text-muted">运行时间</td><td>{{ stats.uptime }}</td></tr>
+                <tr><td class="text-muted">CPU</td><td>{{ stats.cpu }}%</td></tr>
+                <tr><td class="text-muted">内存</td><td>{{ stats.memory_used }} / {{ stats.memory_total }} ({{ stats.memory_percent }}%)</td></tr>
+                <tr><td class="text-muted">磁盘</td><td>{{ stats.disk_used }} / {{ stats.disk_total }} ({{ stats.disk_percent }}%)</td></tr>
+                <tr><td class="text-muted">短信总数</td><td>{{ sms_stats.total_sms }}</td></tr>
+                <tr><td class="text-muted">已转发</td><td>{{ sms_stats.total_forwarded }}</td></tr>
+            </table>
+        </div>
+    </div>
+
+    <!-- 模块状态 -->
+    <div class="col-md-8">
+        <div class="card p-3 h-100">
+            <h6 class="mb-3"><i class="fas fa-microchip"></i> 模块状态 ({{ modem_stats.online }}/{{ modem_stats.total }} 在线)</h6>
+            {% if modems %}
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>名称</th>
+                            <th>端口</th>
+                            <th>型号</th>
+                            <th>运营商</th>
+                            <th>信号</th>
+                            <th>网络</th>
+                            <th>状态</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for mid, m in modems.items() %}
+                        <tr>
+                            <td><strong>{{ m.name }}</strong></td>
+                            <td><code>{{ m.port }}</code></td>
+                            <td>{{ m.info.get('brand','') }} {{ m.info.get('model','') }}</td>
+                            <td>{{ m.info.get('operator','N/A') }}</td>
+                            <td>
+                                {% set pct = m.info.get('signal_percent',0) %}
+                                {% if pct >= 75 %}
+                                <span class="badge-signal signal-excellent">{{ pct }}%</span>
+                                {% elif pct >= 50 %}
+                                <span class="badge-signal signal-good">{{ pct }}%</span>
+                                {% elif pct >= 25 %}
+                                <span class="badge-signal signal-fair">{{ pct }}%</span>
+                                {% else %}
+                                <span class="badge-signal signal-poor">{{ pct }}%</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ m.info.get('network_type','N/A') }}</td>
+                            <td>
+                                {% if m.is_online %}
+                                <span class="status-dot status-online"></span> 在线
+                                {% else %}
+                                <span class="status-dot status-offline"></span> 离线
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center text-muted py-5">
+                <i class="fas fa-satellite-dish fa-3x mb-2"></i>
+                <p>没有连接的模块</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- 资源图表 -->
+<div class="row g-3 mt-3">
+    <div class="col-md-6">
+        <div class="card p-3">
+            <h6><i class="fas fa-chart-line"></i> 系统资源</h6>
+            <canvas id="resourceChart" height="150"></canvas>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card p-3">
+            <h6><i class="fas fa-chart-bar"></i> 短信统计</h6>
+            <canvas id="smsChart" height="150"></canvas>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+{% block extra_scripts %}
+<script>
+// 资源图表
+const resCtx = document.getElementById('resourceChart').getContext('2d');
+const resourceChart = new Chart(resCtx, {
+    type: 'line',
+    data: {
+        labels: [],
+        datasets: [
+            { label: 'CPU %', borderColor: '#3498db', data: [], tension: 0.3, fill: false },
+            { label: '内存 %', borderColor: '#e74c3c', data: [], tension: 0.3, fill: false }
+        ]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true, max: 100 } }
+    }
+});
+
+// 短信图表
+const smsCtx = document.getElementById('smsChart').getContext('2d');
+const smsChart = new Chart(smsCtx, {
+    type: 'doughnut',
+    data: {
+        labels: ['已转发', '未转发'],
+        datasets: [{
+            data: [{{ sms_stats.total_forwarded }}, {{ sms_stats.total_sms - sms_stats.total_forwarded }}],
+            backgroundColor: ['#2ecc71', '#e74c3c']
+        }]
+    },
+    options: { responsive: true, maintainAspectRatio: false }
+});
+
+// 定时刷新
+setInterval(() => {
+    fetch('/api/stats').then(r => r.json()).then(data => {
+        const now = new Date().toLocaleTimeString();
+        resourceChart.data.labels.push(now);
+        resourceChart.data.datasets[0].data.push(data.cpu_percent);
+        resourceChart.data.datasets[1].data.push(data.memory_percent);
+        if (resourceChart.data.labels.length > 20) {
+            resourceChart.data.labels.shift();
+            resourceChart.data.datasets[0].data.shift();
+            resourceChart.data.datasets[1].data.shift();
+        }
+        resourceChart.update();
+    });
+}, 5000);
+</script>
+{% endblock %}

@@ -1,0 +1,63 @@
+{
+    "app": {
+        "name": "4G SMS Forward System",
+        "version": "1.0.0",
+        "debug": false,
+        "host": "0.0.0.0",
+        "port": 5000,
+        "secret_key": "change-this-to-a-random-secret-key",
+        "session_timeout": 3600
+    },
+    "web_auth": {
+        "enabled": true,
+        "username": "admin",
+        "password_hash": "pbkdf2:sha256:600000$salt$hash_placeholder"
+    },
+    "serial": {
+        "default_port": "/dev/ttyUSB2",
+        "baudrate": 115200,
+        "timeout": 3,
+        "write_timeout": 3,
+        "scan_ports": ["/dev/ttyUSB*", "/dev/ttyACM*"],
+        "auto_reconnect": true,
+        "reconnect_interval": 10,
+        "max_reconnect_attempts": 0
+    },
+    "sms": {
+        "sync_interval": 30,
+        "max_records": 100000,
+        "auto_delete_days": 0,
+        "page_size": 20,
+        "hash_algorithm": "sha256"
+    },
+    "logging": {
+        "level": "INFO",
+        "max_size_mb": 10,
+        "backup_count": 5,
+        "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    },
+    "webhook": {
+        "enabled": false,
+        "url": "",
+        "method": "POST",
+        "headers": {},
+        "timeout": 10
+    },
+    "telegram": {
+        "enabled": false,
+        "bot_token": "",
+        "chat_id": ""
+    },
+    "wechat_work": {
+        "enabled": false,
+        "webhook_url": ""
+    },
+    "dingtalk": {
+        "enabled": false,
+        "webhook_url": ""
+    },
+    "feishu": {
+        "enabled": false,
+        "webhook_url": ""
+    }
+}

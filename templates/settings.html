@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}系统设置 - {{ app_name }}{% endblock %}
+{% block page_title %}<h5 class="mb-0"><i class="fas fa-cog"></i> 系统设置</h5>{% endblock %}
+{% block content %}
+
+<div class="row g-3">
+    <div class="col-md-6">
+        <div class="card p-4">
+            <h5 class="mb-3"><i class="fas fa-plug"></i> 串口设置</h5>
+            <div class="mb-2">
+                <label class="form-label small">默认串口</label>
+                <input class="form-control form-control-sm" id="serialPort" value="{{ config.serial.default_port }}">
+            </div>
+            <div class="mb-2">
+                <label class="form-label small">波特率</label>
+                <select class="form-select form-select-sm" id="serialBaudrate">
+                    <option value="9600" {% if config.serial.baudrate == 9600 %}selected{% endif %}>9600</option>
+                    <option value="19200" {% if config.serial.baudrate == 19200 %}selected{% endif %}>19200</option>
+                    <option value="38400" {% if config.serial.baudrate == 38400 %}selected{% endif %}>38400</option>
+                    <option value="57600" {% if config.serial.baudrate == 57600 %}selected{% endif %}>57600</option>
+                    <option value="115200" {% if config.serial.baudrate == 115200 %}selected{% endif %}>115200</option>
+                    <option value="230400" {% if config.serial.baudrate == 230400 %}selected{% endif %}>230400</option>
+                    <option value="460800" {% if config.serial.baudrate == 460800 %}selected{% endif %}>460800</option>
+                </select>
+            </div>
+            <div class="row g-2 mb-2">
+                <div class="col-4">
+                    <label class="form-label small">超时(秒)</label>
+                    <input class="form-control form-control-sm" type="number" id="serialTimeout" value="{{ config.serial.timeout }}" step="0.5">
+                </div>
+                <div class="col-4">
+                    <label class="form-label small">写入超时</label>
+                    <input class="form-control form-control-sm" type="number" id="serialWriteTimeout" value="{{ config.serial.write_timeout }}" step="0.5">
+                </div>
+                <div class="col-4">
+                    <label class="form-label small">重连间隔(秒)</label>
+                    <input class="form-control form-control-sm" type="number" id="reconnectInterval" value="{{ config.serial.reconnect_interval }}">
+                </div>
+            </div>
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" id="autoReconnect" {% if config.serial.auto_reconnect %}checked{% endif %}>
+                <label class="form-check-label">启用自动重连</label>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="saveSerialSettings()"><i class="fas fa-save"></i> 保存串口设置</button>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card p-4">
+            <h5 class="mb-3"><i class="fas fa-sms"></i> 短信设置</h5>
+            <div class="row g-2 mb-2">
+                <div class="col-6">
+                    <label class="form-label small">同步间隔(秒)</label>
+                    <input class="form-control form-control-sm" type="number" id="syncInterval" value="{{ config.sms.sync_interval }}">
+                </div>
+                <div class="col-6">
+                    <label class="form-label small">每页显示条数</label>
+                    <input class="form-control form-control-sm" type="number" id="pageSize" value="{{ config.sms.page_size }}">
+                </div>
+            </div>
+            <div class="row g-2 mb-2">
+                <div class="col-6">
+                    <label class="form-label small">最大保留条数</label>
+                    <input class="form-control form-control-sm" type="number" id="maxRecords" value="{{ config.sms.max_records }}">
+                </div>
+                <div class="col-6">
+                    <label class="form-label small">自动删除(天,0=不删)</label>
+                    <input class="form-control form-control-sm" type="number" id="autoDeleteDays" value="{{ config.sms.auto_delete_days }}">
+                </div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="saveSMSSettings()"><i class="fas fa-save"></i> 保存短信设置</button>
+        </div>
+
+        <div class="card p-4 mt-3">
+            <h5 class="mb-3"><i class="fas fa-file-alt"></i> 日志设置</h5>
+            <div class="row g-2 mb-2">
+                <div class="col-6">
+                    <label class="form-label small">日志级别</label>
+                    <select class="form-select form-select-sm" id="logLevel">
+                        <option value="DEBUG" {% if config.logging.level == 'DEBUG' %}selected{% endif %}>DEBUG</option>
+                        <option value="INFO" {% if config.logging.level == 'INFO' %}selected{% endif %}>INFO</option>
+                        <option value="WARNING" {% if config.logging.level == 'WARNING' %}selected{% endif %}>WARNING</option>
+                        <option value="ERROR" {% if config.logging.level == 'ERROR' %}selected{% endif %}>ERROR</option>
+                    </select>
+                </div>
+                <div class="col-6">
+                    <label class="form-label small">日志大小(MB)</label>
+                    <input class="form-control form-control-sm" type="number" id="logSize" value="{{ config.logging.max_size_mb }}">
+                </div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="saveLogSettings()"><i class="fas fa-save"></i> 保存日志设置</button>
+        </div>
+    </div>
+</div>
+
+<!-- 配置导入导出 -->
+<div class="card p-4 mt-3">
+    <h5 class="mb-3"><i class="fas fa-exchange-alt"></i> 配置导入/导出</h5>
+    <div class="d-flex gap-2">
+        <a href="/api/config/export" class="btn btn-outline-info"><i class="fas fa-download"></i> 导出配置</a>
+        <div>
+            <input type="file" id="configFile" accept=".json" class="form-control form-control-sm d-inline-block w-auto">
+            <button class="btn btn-outline-warning" onclick="importConfig()"><i class="fas fa-upload"></i> 导入配置</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+{% block extra_scripts %}
+<script>
+async function saveSection(section, values, msg) {
+    const resp = await fetch('/api/settings', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({section, values})
+    });
+    const data = await resp.json();
+    showToast(data.success ? (msg || '保存成功') : '保存失败', data.success?'success':'error');
+}
+
+function saveSerialSettings() {
+    saveSection('serial', {
+        default_port: document.getElementById('serialPort').value,
+        baudrate: parseInt(document.getElementById('serialBaudrate').value),
+        timeout: parseFloat(document.getElementById('serialTimeout').value),
+        write_timeout: parseFloat(document.getElementById('serialWriteTimeout').value),
+        reconnect_interval: parseInt(document.getElementById('reconnectInterval').value),
+        auto_reconnect: document.getElementById('autoReconnect').checked,
+    }, '串口设置已保存');
+}
+
+function saveSMSSettings() {
+    saveSection('sms', {
+        sync_interval: parseInt(document.getElementById('syncInterval').value),
+        page_size: parseInt(document.getElementById('pageSize').value),
+        max_records: parseInt(document.getElementById('maxRecords').value),
+        auto_delete_days: parseInt(document.getElementById('autoDeleteDays').value),
+    }, '短信设置已保存');
+}
+
+function saveLogSettings() {
+    saveSection('logging', {
+        level: document.getElementById('logLevel').value,
+        max_size_mb: parseInt(document.getElementById('logSize').value),
+    }, '日志设置已保存');
+}
+
+async function importConfig() {
+    const file = document.getElementById('configFile').files[0];
+    if (!file) { showToast('请选择文件', 'warning'); return; }
+    const formData = new FormData();
+    formData.append('file', file);
+    const resp = await fetch('/api/config/import', {method:'POST', body: formData});
+    const data = await resp.json();
+    showToast(data.success ? '配置导入成功，请刷新页面' : ('导入失败: ' + data.error), data.success?'success':'error');
+    if (data.success) setTimeout(() => location.reload(), 1500);
+}
+</script>
+{% endblock %}

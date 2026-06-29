@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}模块管理 - {{ app_name }}{% endblock %}
+{% block page_title %}<h5 class="mb-0"><i class="fas fa-microchip"></i> 模块管理</h5>{% endblock %}
+{% block content %}
+
+<div class="mb-3">
+    <button class="btn btn-primary btn-sm" onclick="scanPorts()"><i class="fas fa-search"></i> 扫描串口</button>
+    <button class="btn btn-success btn-sm" onclick="discoverModems()"><i class="fas fa-plug"></i> 自动发现</button>
+    <button class="btn btn-outline-secondary btn-sm" onclick="refreshModems()"><i class="fas fa-sync"></i> 刷新</button>
+</div>
+
+<div class="row g-3" id="modemCards">
+    <div class="col-12 text-center text-muted py-5">加载中...</div>
+</div>
+
+<!-- 备注编辑模态框 -->
+<div class="modal fade" id="editNameModal">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">修改备注</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <input type="text" class="form-control" id="editNameInput" placeholder="输入备注名称">
+                <input type="hidden" id="editModuleId">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button class="btn btn-primary" onclick="saveName()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+{% block extra_scripts %}
+<script>
+function loadModems() {
+    fetch('/api/modems').then(r => r.json()).then(modems => {
+        const container = document.getElementById('modemCards');
+        if (modems.length === 0) {
+            container.innerHTML = '<div class="col-12 text-center text-muted py-5"><i class="fas fa-satellite-dish fa-3x mb-2"></i><p>没有发现模块，请点击"扫描串口"或"自动发现"</p></div>';
+            return;
+        }
+        container.innerHTML = modems.map(m => `
+            <div class="col-md-6 col-lg-4">
+                <div class="card p-3 h-100">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <h6 class="mb-1">${m.name || m.port}</h6>
+                            <small class="text-muted">${m.brand} ${m.model}</small>
+                        </div>
+                        <span class="status-dot ${m.is_online ? 'status-online' : 'status-offline'}"></span>
+                    </div>
+                    <table class="table table-sm mb-2 small">
+                        <tr><td class="text-muted">端口</td><td><code>${m.port}</code></td></tr>
+                        <tr><td class="text-muted">IMEI</td><td>${m.imei || 'N/A'}</td></tr>
+                        <tr><td class="text-muted">ICCID</td><td>${m.iccid || 'N/A'}</td></tr>
+                        <tr><td class="text-muted">运营商</td><td>${m.operator || 'N/A'}</td></tr>
+                        <tr><td class="text-muted">网络</td><td>${m.network_type || 'N/A'}</td></tr>
+                        <tr><td class="text-muted">信号</td><td>${m.signal_csq != null ? m.signal_csq + ' (' + m.signal_percent + '%)' : 'N/A'}</td></tr>
+                        <tr><td class="text-muted">SIM</td><td>${m.sim_status || 'N/A'}</td></tr>
+                        <tr><td class="text-muted">漫游</td><td>${m.is_roaming ? '是' : '否'}</td></tr>
+                    </table>
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-outline-info btn-sm flex-grow-1" onclick="editName('${m.module_id}', '${m.name}')"><i class="fas fa-edit"></i> 备注</button>
+                        <button class="btn btn-outline-warning btn-sm flex-grow-1" onclick="reconnect('${m.module_id}')"><i class="fas fa-sync"></i> 重连</button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="removeModem('${m.module_id}')"><i class="fas fa-times"></i></button>
+                    </div>
+                </div>
+            </div>`).join('');
+    });
+}
+
+function editName(moduleId, currentName) {
+    document.getElementById('editModuleId').value = moduleId;
+    document.getElementById('editNameInput').value = currentName;
+    new bootstrap.Modal(document.getElementById('editNameModal')).show();
+}
+
+async function saveName() {
+    const moduleId = document.getElementById('editModuleId').value;
+    const name = document.getElementById('editNameInput').value;
+    await fetch(`/api/modems/${moduleId}`, {
+        method: 'PUT', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name})
+    });
+    bootstrap.Modal.getInstance(document.getElementById('editNameModal')).hide();
+    loadModems();
+    showToast('备注已更新', 'success');
+}
+
+async function reconnect(moduleId) {
+    showToast('正在重连...', 'info');
+    const resp = await fetch(`/api/modems/${moduleId}/reconnect`, {method:'POST'});
+    const data = await resp.json();
+    showToast(data.success ? '重连成功' : '重连失败', data.success?'success':'error');
+    loadModems();
+}
+
+async function removeModem(moduleId) {
+    if (!confirm('确定要移除该模块吗？')) return;
+    await fetch(`/api/modems/${moduleId}`, {method:'DELETE'});
+    loadModems();
+    showToast('模块已移除', 'info');
+}
+
+async function scanPorts() {
+    const resp = await fetch('/api/modems/scan', {method:'POST'});
+    const data = await resp.json();
+    showToast(`发现 ${data.ports.length} 个串口: ${data.ports.join(', ') || '无'}`, 'info');
+}
+
+async function discoverModems() {
+    showToast('正在自动发现模块...', 'info');
+    const resp = await fetch('/api/modems/discover', {method:'POST'});
+    const data = await resp.json();
+    showToast(`成功连接 ${data.length} 个模块`, 'success');
+    loadModems();
+}
+
+function refreshModems() { loadModems(); }
+
+loadModems();
+setInterval(loadModems, 30000);
+</script>
+{% endblock %}

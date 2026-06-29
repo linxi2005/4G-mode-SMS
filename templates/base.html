@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ app_name }}{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/datatables@1.11.5/media/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        :root {
+            --sidebar-width: 250px;
+        }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background-color: #f5f7fa;
+        }
+        [data-bs-theme="dark"] body {
+            background-color: #1a1d23;
+        }
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: var(--sidebar-width);
+            height: 100vh;
+            background: linear-gradient(180deg, #1e3a5f 0%, #15294a 100%);
+            color: #fff;
+            z-index: 1000;
+            overflow-y: auto;
+            transition: transform 0.3s;
+        }
+        [data-bs-theme="dark"] .sidebar {
+            background: linear-gradient(180deg, #0d1b2a 0%, #0a1520 100%);
+        }
+        .sidebar .logo {
+            padding: 20px;
+            font-size: 1.3rem;
+            font-weight: 700;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .sidebar .logo i {
+            font-size: 1.5rem;
+            color: #4fc3f7;
+        }
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 20px;
+            border-radius: 0;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.95rem;
+        }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+        }
+        .sidebar .nav-link i {
+            width: 20px;
+            text-align: center;
+        }
+        .main-content {
+            margin-left: var(--sidebar-width);
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .navbar-top {
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            border-radius: 10px;
+            margin-bottom: 20px;
+            padding: 12px 20px;
+        }
+        [data-bs-theme="dark"] .navbar-top {
+            background: #252830;
+        }
+        .card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            transition: box-shadow 0.2s;
+        }
+        [data-bs-theme="dark"] .card {
+            background: #252830;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        .card:hover {
+            box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+        }
+        .stat-card {
+            text-align: center;
+            padding: 20px;
+        }
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: 700;
+        }
+        .stat-card .label {
+            color: #888;
+            font-size: 0.85rem;
+            margin-top: 5px;
+        }
+        .status-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .status-online { background: #2ecc71; }
+        .status-offline { background: #e74c3c; }
+        .status-warning { background: #f39c12; }
+        .badge-signal {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+        .signal-excellent { background: #27ae60; color: #fff; }
+        .signal-good { background: #2ecc71; color: #fff; }
+        .signal-fair { background: #f39c12; color: #fff; }
+        .signal-poor { background: #e74c3c; color: #fff; }
+        .table-container {
+            background: #fff;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        [data-bs-theme="dark"] .table-container {
+            background: #252830;
+        }
+        [data-bs-theme="dark"] .table {
+            color: #e0e0e0;
+        }
+        [data-bs-theme="dark"] .table thead th {
+            border-bottom-color: #444;
+        }
+        [data-bs-theme="dark"] .text-muted {
+            color: #aaa !important;
+        }
+        [data-bs-theme="dark"] .navbar-top {
+            background: #252830;
+        }
+        [data-bs-theme="dark"] .dropdown-menu {
+            background: #30333a;
+            color: #e0e0e0;
+        }
+        [data-bs-theme="dark"] .dropdown-item {
+            color: #e0e0e0;
+        }
+        [data-bs-theme="dark"] .dropdown-item:hover {
+            background: #3a3d44;
+        }
+        [data-bs-theme="dark"] .form-control, [data-bs-theme="dark"] .form-select {
+            background: #1e1f24;
+            border-color: #444;
+            color: #e0e0e0;
+        }
+        [data-bs-theme="dark"] .page-link {
+            background: #252830;
+            border-color: #444;
+            color: #e0e0e0;
+        }
+        [data-bs-theme="dark"] .modal-content {
+            background: #252830;
+            color: #e0e0e0;
+        }
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+        }
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            .sidebar.show {
+                transform: translateX(0);
+            }
+            .main-content {
+                margin-left: 0;
+            }
+            .mobile-toggle {
+                display: block !important;
+            }
+        }
+        .mobile-toggle {
+            display: none;
+        }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <!-- 侧边栏 -->
+    <nav class="sidebar" id="sidebar">
+        <div class="logo">
+            <i class="fas fa-satellite-dish"></i>
+            <span>{{ app_name }}</span>
+        </div>
+        <ul class="nav flex-column mt-2">
+            <li class="nav-item">
+                <a class="nav-link {% if request.path == '/' %}active{% endif %}" href="/">
+                    <i class="fas fa-tachometer-alt"></i> 首页
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if request.path == '/sms' %}active{% endif %}" href="/sms">
+                    <i class="fas fa-sms"></i> 短信记录
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if request.path == '/send' %}active{% endif %}" href="/send">
+                    <i class="fas fa-paper-plane"></i> 发送短信
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if request.path == '/modems' %}active{% endif %}" href="/modems">
+                    <i class="fas fa-microchip"></i> 模块管理
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if request.path == '/at' %}active{% endif %}" href="/at">
+                    <i class="fas fa-terminal"></i> AT调试
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if request.path == '/mail' %}active{% endif %}" href="/mail">
+                    <i class="fas fa-envelope"></i> 邮件配置
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if request.path == '/settings' %}active{% endif %}" href="/settings">
+                    <i class="fas fa-cog"></i> 系统设置
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if request.path == '/logs' %}active{% endif %}" href="/logs">
+                    <i class="fas fa-list-alt"></i> 日志
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if request.path == '/database' %}active{% endif %}" href="/database">
+                    <i class="fas fa-database"></i> 数据库
+                </a>
+            </li>
+        </ul>
+        <div class="mt-auto p-3" style="position:absolute;bottom:0;width:100%;border-top:1px solid rgba(255,255,255,0.1);">
+            <small class="text-white-50">v{{ app_version }}</small>
+        </div>
+    </nav>
+
+    <!-- 主内容 -->
+    <div class="main-content">
+        <div class="navbar-top d-flex justify-content-between align-items-center">
+            <div>
+                <button class="btn btn-sm btn-outline-secondary mobile-toggle me-2" onclick="document.getElementById('sidebar').classList.toggle('show')">
+                    <i class="fas fa-bars"></i>
+                </button>
+                {% block page_title %}首页{% endblock %}
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <span id="modem-status-badge" class="badge bg-success">
+                    <i class="fas fa-circle"></i> <span id="online-count">{{ modem_online_count }}</span> 在线
+                </span>
+                <button class="btn btn-sm btn-outline-secondary" onclick="toggleTheme()" title="切换主题">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <a href="/logout" class="btn btn-sm btn-outline-danger">
+                    <i class="fas fa-sign-out-alt"></i>
+                </a>
+            </div>
+        </div>
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- Toast容器 -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 主题切换
+        function toggleTheme() {
+            const html = document.documentElement;
+            const current = html.getAttribute('data-bs-theme');
+            const next = current === 'dark' ? 'light' : 'dark';
+            html.setAttribute('data-bs-theme', next);
+            document.getElementById('theme-icon').className = next === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+            localStorage.setItem('theme', next);
+        }
+        // 恢复主题
+        (function() {
+            const saved = localStorage.getItem('theme');
+            if (saved) {
+                document.documentElement.setAttribute('data-bs-theme', saved);
+                document.getElementById('theme-icon').className = saved === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+            }
+        })();
+
+        // Toast通知
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const colors = { success: 'bg-success', error: 'bg-danger', warning: 'bg-warning', info: 'bg-info' };
+            const toast = document.createElement('div');
+            toast.className = `toast align-items-center text-white ${colors[type] || colors.info} border-0`;
+            toast.setAttribute('role', 'alert');
+            toast.innerHTML = `
+                <div class="d-flex">
+                    <div class="toast-body">${message}</div>
+                    <button class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>`;
+            container.appendChild(toast);
+            const bsToast = new bootstrap.Toast(toast, { delay: 3000 });
+            bsToast.show();
+            toast.addEventListener('hidden.bs.toast', () => toast.remove());
+        }
+
+        // WebSocket连接
+        const socket = io();
+        socket.on('connect', () => console.log('WebSocket已连接'));
+        socket.on('new_sms', (data) => {
+            showToast(`新短信: ${data.phone} - ${data.content.substring(0, 30)}...`, 'info');
+            updateModemStatus();
+        });
+        socket.on('modem_status', (data) => {
+            updateModemStatus();
+        });
+        socket.on('log_entry', (data) => {
+            if (data.level === 'ERROR') {
+                showToast(`[${data.level}] ${data.message}`, 'error');
+            }
+        });
+
+        function updateModemStatus() {
+            fetch('/api/modems').then(r => r.json()).then(modems => {
+                const online = modems.filter(m => m.is_online).length;
+                document.getElementById('online-count').textContent = online;
+                const badge = document.getElementById('modem-status-badge');
+                badge.className = online > 0 ? 'badge bg-success' : 'badge bg-danger';
+            });
+        }
+
+        // 格式化日期
+        function formatDate(isoStr) {
+            if (!isoStr) return '-';
+            const d = new Date(isoStr);
+            return d.toLocaleString('zh-CN');
+        }
+    </script>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

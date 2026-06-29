@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}短信记录 - {{ app_name }}{% endblock %}
+{% block page_title %}<h5 class="mb-0"><i class="fas fa-sms"></i> 短信记录</h5>{% endblock %}
+{% block content %}
+
+<div class="card p-3 mb-3">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-2">
+            <label class="form-label small">搜索</label>
+            <input type="text" class="form-control form-control-sm" id="filterSearch" placeholder="号码/内容/模块...">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small">手机号</label>
+            <input type="text" class="form-control form-control-sm" id="filterPhone" placeholder="13800138000">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small">开始日期</label>
+            <input type="date" class="form-control form-control-sm" id="filterDateFrom">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small">结束日期</label>
+            <input type="date" class="form-control form-control-sm" id="filterDateTo">
+        </div>
+        <div class="col-md-1">
+            <label class="form-label small">转发状态</label>
+            <select class="form-select form-select-sm" id="filterForwarded">
+                <option value="">全部</option>
+                <option value="true">已转发</option>
+                <option value="false">未转发</option>
+            </select>
+        </div>
+        <div class="col-md-1">
+            <label class="form-label small">已读状态</label>
+            <select class="form-select form-select-sm" id="filterRead">
+                <option value="">全部</option>
+                <option value="true">已读</option>
+                <option value="false">未读</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-primary btn-sm w-100" onclick="loadSMS()"><i class="fas fa-search"></i> 查询</button>
+        </div>
+    </div>
+</div>
+
+<div class="card p-3 mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <div>
+            <button class="btn btn-outline-success btn-sm" onclick="batchAction('resend')"><i class="fas fa-redo"></i> 批量重发</button>
+            <button class="btn btn-outline-info btn-sm" onclick="batchAction('mark_read')"><i class="fas fa-check"></i> 标记已读</button>
+            <button class="btn btn-outline-warning btn-sm" onclick="batchAction('mark_unread')"><i class="fas fa-eye-slash"></i> 标记未读</button>
+            <button class="btn btn-outline-danger btn-sm" onclick="batchAction('delete')"><i class="fas fa-trash"></i> 批量删除</button>
+        </div>
+        <div>
+            <button class="btn btn-outline-secondary btn-sm" onclick="exportSMS('json')"><i class="fas fa-file-code"></i> JSON</button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="exportSMS('csv')"><i class="fas fa-file-csv"></i> CSV</button>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+            <thead>
+                <tr>
+                    <th><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                    <th>时间</th>
+                    <th>模块</th>
+                    <th>号码</th>
+                    <th>内容</th>
+                    <th>已读</th>
+                    <th>转发</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="smsTableBody">
+                <tr><td colspan="8" class="text-center text-muted">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <nav class="mt-3">
+        <ul class="pagination pagination-sm justify-content-center" id="pagination"></ul>
+    </nav>
+</div>
+
+<!-- 详情模态框 -->
+<div class="modal fade" id="smsDetailModal">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">短信详情</h5>
+                <button class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="smsDetailContent"></div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+{% block extra_scripts %}
+<script>
+let currentPage = 1;
+let selectedIds = new Set();
+
+function loadSMS(page = 1) {
+    currentPage = page;
+    const params = new URLSearchParams({
+        page, per_page: 20,
+        search: document.getElementById('filterSearch').value,
+        phone: document.getElementById('filterPhone').value,
+        date_from: document.getElementById('filterDateFrom').value,
+        date_to: document.getElementById('filterDateTo').value,
+        forwarded: document.getElementById('filterForwarded').value,
+        is_read: document.getElementById('filterRead').value,
+    });
+
+    fetch('/api/sms?' + params).then(r => r.json()).then(data => {
+        const tbody = document.getElementById('smsTableBody');
+        if (data.items.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">暂无短信记录</td></tr>';
+        } else {
+            tbody.innerHTML = data.items.map(s => `
+                <tr>
+                    <td><input type="checkbox" class="sms-check" value="${s.id}" onchange="updateSelection()"></td>
+                    <td style="white-space:nowrap;font-size:0.85rem">${formatDate(s.receive_time)}</td>
+                    <td><span class="badge bg-secondary">${s.modem_name || '-'}</span></td>
+                    <td><code>${s.phone}</code></td>
+                    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${s.content}">${s.content}</td>
+                    <td>${s.is_read ? '<i class="fas fa-check text-success"></i>' : '<i class="fas fa-times text-muted"></i>'}</td>
+                    <td>${s.forwarded ? '<span class="badge bg-success">已转发</span>' : '<span class="badge bg-warning">未转发</span>'}</td>
+                    <td>
+                        <button class="btn btn-xs btn-outline-info btn-sm" onclick="viewDetail(${s.id})" title="详情"><i class="fas fa-eye"></i></button>
+                        <button class="btn btn-xs btn-outline-success btn-sm" onclick="resendSMS(${s.id})" title="重发"><i class="fas fa-redo"></i></button>
+                    </td>
+                </tr>`).join('');
+        }
+
+        // 分页
+        const pag = document.getElementById('pagination');
+        let html = '';
+        for (let i = 1; i <= data.pages; i++) {
+            html += `<li class="page-item ${i === page ? 'active' : ''}"><a class="page-link" href="#" onclick="loadSMS(${i})">${i}</a></li>`;
+        }
+        pag.innerHTML = html;
+
+        selectedIds.clear();
+        document.getElementById('selectAll').checked = false;
+    });
+}
+
+function toggleSelectAll() {
+    const checked = document.getElementById('selectAll').checked;
+    document.querySelectorAll('.sms-check').forEach(cb => {
+        cb.checked = checked;
+        if (checked) selectedIds.add(parseInt(cb.value));
+        else selectedIds.delete(parseInt(cb.value));
+    });
+}
+
+function updateSelection() {
+    document.querySelectorAll('.sms-check').forEach(cb => {
+        if (cb.checked) selectedIds.add(parseInt(cb.value));
+        else selectedIds.delete(parseInt(cb.value));
+    });
+}
+
+async function batchAction(action) {
+    if (selectedIds.size === 0) { showToast('请选择短信', 'warning'); return; }
+    const resp = await fetch('/api/sms/batch', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ids: Array.from(selectedIds), action})
+    });
+    const data = await resp.json();
+    if (data.success) { showToast(`成功: ${data.count} 条`, 'success'); loadSMS(currentPage); }
+}
+
+async function resendSMS(id) {
+    const resp = await fetch(`/api/sms/${id}/resend`, {method:'POST'});
+    const data = await resp.json();
+    showToast(data.success ? '重发成功' : '重发失败', data.success ? 'success' : 'error');
+    if (data.success) loadSMS(currentPage);
+}
+
+function viewDetail(id) { /* 从当前数据中找 */ }
+
+function exportSMS(format) {
+    window.open('/api/sms/export?format=' + format + '&search=' + document.getElementById('filterSearch').value, '_blank');
+}
+
+loadSMS();
+</script>
+{% endblock %}

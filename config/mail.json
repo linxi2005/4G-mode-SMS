@@ -1,0 +1,20 @@
+{
+    "enabled": true,
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587,
+    "use_tls": true,
+    "use_ssl": false,
+    "username": "your-email@gmail.com",
+    "password": "",
+    "sender_name": "4G SMS System",
+    "from_email": "your-email@gmail.com",
+    "recipients": [
+        "recipient1@example.com",
+        "recipient2@example.com"
+    ],
+    "subject_template": "收到来自{{phone}}的新短信 [{{module_name}}]",
+    "body_template": "<h2>短信通知</h2><table><tr><td><strong>来源号码：</strong></td><td>{{phone}}</td></tr><tr><td><strong>接收时间：</strong></td><td>{{time}}</td></tr><tr><td><strong>短信内容：</strong></td><td>{{content}}</td></tr><tr><td><strong>来源模块：</strong></td><td>{{module_name}} ({{module_model}})</td></tr><tr><td><strong>模块端口：</strong></td><td>{{module_port}}</td></tr><tr><td><strong>运营商：</strong></td><td>{{operator}}</td></tr><tr><td><strong>IMEI：</strong></td><td>{{imei}}</td></tr><tr><td><strong>信号强度：</strong></td><td>{{signal}}</td></tr></table>",
+    "timeout": 30,
+    "retry_count": 3,
+    "retry_delay": 60
+}
