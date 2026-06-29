@@ -73,8 +73,8 @@
 
 | 品牌 | 型号 | 支持级别 | 备注 |
 |------|------|:--------:|------|
-| **Quectel 移远** 🥇 | EC20, EC25, EG25, EC200, EG91 | ⭐⭐⭐ 亲儿子 | 重点优化，QNWINFO 信号查询 |
-| **SIMCom** 🥈 | SIM7600, A7600, SIM7000, SIM800 | ⭐⭐ 干儿子 | CNSMOD 特有指令适配 |
+| **Quectel 移远** 🥇 | EC20, EC25, EG25, EC200, EG91, RG500, RM500 | ⭐⭐⭐ 亲儿子 | 5G 模块也支持 |
+| **SIMCom** 🥈 | SIM7600, A7600, SIM7000, SIM800, A7670 | ⭐⭐ 干儿子 | CNSMOD 特有指令适配 |
 | **Huawei 华为** 🥉 | ME909, ME906, MU609 | ⭐⭐ 外甥 | ^SYSINFO/^HCSQ 已适配 |
 | **其他兼容模块** | 任何支持标准 AT 指令的 | ⭐ 路人甲 | 自动走 Generic 驱动，能用 |
 
@@ -86,7 +86,7 @@
 
 | 项目 | 最低配置 | 推荐配置 | 备注 |
 |------|----------|----------|------|
-| 🐍 Python | 3.11+ | 3.12+ | 别用 2.7，都 3026 年了 |
+| 🐍 Python | 3.8+ | 3.11+ | 兼容 3.8~3.12 |
 | 🐧 OS | Any Linux | Debian/Ubuntu | ARMv7 海思平台也可 |
 | 🧠 RAM | 512MB | 1GB+ | 树莓派 Zero 都够 |
 | 💿 磁盘 | 100MB | 1GB+ | 留给短信的「别墅」 |
@@ -100,15 +100,19 @@
 ### 第一步：克隆 & 安装 📦
 
 ```bash
-# 进入项目目录
-cd project
+# 先确保 data/ 目录存在
+mkdir -p data/log
 
 # 安装依赖（建议用 venv）
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# 此时去泡杯咖啡 ☕，下载很快的
+# 如果不想用 venv（ARM 设备上管理方便）：
+# pip install --break-system-packages -r requirements.txt
+
+# 如果 flask-socketio 装不上也不影响核心功能
+# 只是少了 WebSocket 实时推送而已
 ```
 
 ### 第二步：配置 🔧
@@ -120,9 +124,17 @@ pip install -r requirements.txt
 ```json
 {
   "serial": {
-    "default_port": "/dev/ttyUSB2",   // 👈 改成你 4G 模块的串口
-    "baudrate": 115200,                // 一般不用改
-    "scan_ports": ["/dev/ttyUSB*"]     // 自动扫描哪些串口
+    "default_port": "/dev/ttyUSB2",
+    "baudrate": 115200,
+    "scan_ports": ["/dev/ttyUSB*"],
+    "preferred_ports": [             // 👈 优先扫描的端口
+      "/dev/ttyUSB2",
+      "/dev/ttyUSB3"
+    ],
+    "ignore_ports": [                // 👈 忽略的端口（如 DIAG 口）
+      "/dev/ttyUSB0"
+    ],
+    "auto_scan": true                // 启动时自动扫描
   },
   "web_auth": {
     "username": "admin",
@@ -445,9 +457,14 @@ sudo chmod 666 /dev/ttyUSB*
 <summary><b>Q: 模块不响应 AT 指令？</b></summary>
 
 1. 确认串口号对不对：`ls /dev/ttyUSB*`
-2. 用 `screen` 测试：`screen /dev/ttyUSB2 115200` 然后敲 `AT` 回车
-3. 查看 `dmesg | grep tty` 看驱动有没有加载
-4. EC20 可能需要先 `echo -ne "AT\r\n" > /dev/ttyUSB2` 唤醒
+2. **Quectel 模块有多个串口，只有 USB2/USB3 是 AT 口！**
+   - `ttyUSB0` → DIAG（诊断口，打不开是正常的）
+   - `ttyUSB1` → GNSS
+   - **`ttyUSB2`** → AT 指令口 ← 用这个！
+   - **`ttyUSB3`** → 备用 AT 口
+3. 在 `config.json` 中把 `ttyUSB0` 加入 `ignore_ports`
+4. 用 `screen` 测试：`screen /dev/ttyUSB2 115200` 然后敲 `AT` 回车
+5. 查看 `dmesg | grep tty` 看驱动有没有加载
 </details>
 
 <details>

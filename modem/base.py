@@ -48,7 +48,7 @@ class BaseModemDriver:
     # ---- 串口操作 ----
 
     def open(self):
-        """打开串口连接"""
+        """打开串口连接（增强异常处理，兼容 ARM/Linux 全部异常类型）"""
         try:
             self._serial = serial.Serial(
                 port=self.port,
@@ -64,8 +64,12 @@ class BaseModemDriver:
             self._is_open = True
             logger.info(f"[{self.port}] 串口已打开 (baudrate={self.baudrate})")
             return True
-        except serial.SerialException as e:
-            logger.error(f"[{self.port}] 打开串口失败: {e}")
+        except (serial.SerialException, BrokenPipeError, PermissionError,
+                OSError, IOError, TimeoutError, Exception) as e:
+            logger.warning(
+                f"[{self.port}] 打开串口失败 "
+                f"(类型={type(e).__name__}, 原因={e})"
+            )
             self._is_open = False
             return False
 

@@ -15,11 +15,17 @@ class DatabaseManager:
 
     def __init__(self, app=None):
         self.app = app
-        if app:
-            self.init_app(app)
+        # 不再在 __init__ 中调用 init_app，由外部显式调用一次
+        if app is not None:
+            logger.warning(
+                "DatabaseManager(app) 已废弃，请使用 DatabaseManager() 然后 .init_app(app)"
+            )
 
     def init_app(self, app):
-        """初始化Flask应用数据库"""
+        """初始化Flask应用数据库（仅调用一次）"""
+        if self.app is not None:
+            logger.info("DatabaseManager 已经初始化过，跳过重复 init_app")
+            return
         db_path = app.config.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///data/sms.db')
         app.config['SQLALCHEMY_DATABASE_URI'] = db_path
         app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -29,6 +35,7 @@ class DatabaseManager:
         }
         db.init_app(app)
         self.app = app
+        logger.info("DatabaseManager 初始化完成")
 
     def create_all(self):
         """创建所有数据表"""

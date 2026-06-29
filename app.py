@@ -16,8 +16,15 @@ from flask import (
     Flask, render_template, request, jsonify, redirect,
     url_for, session, send_file, Response
 )
-from flask_socketio import SocketIO
 import psutil
+
+# Flask-SocketIO 可选（ARM/Linux 环境可能装不上）
+try:
+    from flask_socketio import SocketIO  # noqa: F811
+    HAS_SOCKETIO = True
+except ImportError:
+    HAS_SOCKETIO = False
+    SocketIO = None  # type: ignore
 
 # 确保项目根目录在 Python 路径中
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -53,15 +60,24 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_recycle': 3600,
 }
 
-# 初始化数据库
-db_manager = DatabaseManager(app)
-db.init_app(app)
+# 初始化数据库（只初始化一次）
+# DatabaseManager 构造函数不会再调用 db.init_app，避免重复注册
+db_manager = DatabaseManager()
+db_manager.init_app(app)
 
 # 初始化日志（在数据库之后）
 logger = setup_logger(app, config_manager)
 
-# 初始化 SocketIO
-socketio.init_app(app, async_mode='threading', cors_allowed_origins='*')
+# 初始化 SocketIO（如果可用）
+if HAS_SOCKETIO:
+    try:
+        socketio.init_app(app, async_mode='threading', cors_allowed_origins='*')
+        logger.info("WebSocket 支持已启用")
+    except Exception as e:
+        logger.warning(f"WebSocket 初始化失败（不影响核心功能）: {e}")
+        HAS_SOCKETIO = False
+else:
+    logger.info("flask-socketio 未安装，WebSocket 实时推送不可用（短信/邮件功能正常）")
 
 # 数据库会话工厂
 def get_db_session():
@@ -734,15 +750,15 @@ def api_import_config():
 
 # ---- WebSocket 事件 ----
 
-@socketio.on('connect')
-def handle_connect():
-    notifier.register_client(request.sid)
-    logger.debug(f"WebSocket客户端连接: {request.sid}")
+if HAS_SOCKETIO:
+    @socketio.on('connect')
+    def handle_connect():
+        notifier.register_client(request.sid)
+        logger.debug(f"WebSocket客户端连接: {request.sid}")
 
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    notifier.unregister_client(request.sid)
+    @socketio.on('disconnect')
+    def handle_disconnect():
+        notifier.unregister_client(request.sid)
 
 
 # ---- 上下文处理器 ----
@@ -768,8 +784,11 @@ def init_app():
         db.create_all()
         logger.info("数据库表已初始化")
 
-        # 自动发现模块
-        modem_manager.auto_discover()
+        # 自动发现模块（异常不影响启动）
+        try:
+            modem_manager.auto_discover()
+        except Exception as e:
+            logger.error(f"模块自动发现异常（不影响 Web 服务）: {type(e).__name__}: {e}")
 
         # 启动短信同步服务
         sms_engine.start_sync_service()
@@ -813,7 +832,10 @@ if __name__ == '__main__':
     logger.info(f"启动 Web 服务器: {host}:{port} (debug={debug})")
 
     try:
-        socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
+        if HAS_SOCKETIO and socketio:
+            socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
+        else:
+            app.run(host=host, port=port, debug=debug)
     except KeyboardInterrupt:
         pass
     finally:

@@ -19,6 +19,16 @@
         "timeout": 3,
         "write_timeout": 3,
         "scan_ports": ["/dev/ttyUSB*", "/dev/ttyACM*"],
+        "preferred_ports": [
+            "/dev/ttyUSB2",
+            "/dev/ttyUSB3",
+            "/dev/ttyUSB1",
+            "/dev/ttyUSB4"
+        ],
+        "ignore_ports": [
+            "/dev/ttyUSB0"
+        ],
+        "auto_scan": true,
         "auto_reconnect": true,
         "reconnect_interval": 10,
         "max_reconnect_attempts": 0

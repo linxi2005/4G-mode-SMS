@@ -64,49 +64,87 @@ class ModemInstance:
                 logger.error(f"[{self.name}] 短信回调异常: {e}")
 
     def connect(self):
-        """连接并识别模块"""
+        """连接并识别模块（增强异常处理，任何步骤失败均不导致程序退出）"""
         logger.info(f"[{self.name}] 正在连接 {self.port}...")
 
-        # 先尝试用BaseDriver打开串口
+        # Step 1: 用 BaseDriver 打开串口
         base_driver = BaseModemDriver(self.port, self.baudrate, self.timeout, self.write_timeout)
-        if not base_driver.open():
-            self.last_error = f"无法打开串口 {self.port}"
+        try:
+            if not base_driver.open():
+                self.last_error = f"无法打开串口 {self.port}"
+                logger.info(f"[{self.name}] {self.last_error}")
+                return False
+        except Exception as e:
+            self.last_error = f"打开串口异常: {type(e).__name__}: {e}"
+            logger.error(f"[{self.name}] {self.last_error}")
             return False
 
-        # 测试AT通信
-        if not base_driver.test_communication():
+        # Step 2: 测试 AT 通信
+        try:
+            if not base_driver.test_communication():
+                base_driver.close()
+                self.last_error = f"串口 {self.port} 无 AT 响应"
+                logger.info(f"[{self.name}] {self.last_error}")
+                return False
+        except Exception as e:
             base_driver.close()
-            self.last_error = f"串口 {self.port} 无AT响应"
+            self.last_error = f"AT 测试异常: {type(e).__name__}: {e}"
+            logger.error(f"[{self.name}] {self.last_error}")
             return False
 
-        # 识别品牌和型号
-        model = self._identify_model(base_driver)
-        brand = self._identify_brand(model, base_driver)
+        # Step 3: 识别品牌和型号
+        try:
+            model = self._identify_model(base_driver)
+            brand = self._identify_brand(model, base_driver)
+            logger.info(f"[{self.name}] 识别: {brand} {model}")
+        except Exception as e:
+            logger.warning(f"[{self.name}] 识别品牌型号异常: {type(e).__name__}: {e}，使用默认")
+            model = 'Unknown'
+            brand = 'Generic'
 
-        # 选择驱动
+        # Step 4: 关闭临时驱动，用正确的驱动重新打开
         driver_class = self._select_driver(brand, model)
         base_driver.close()
-        time.sleep(0.5)
+        time.sleep(0.3)
 
-        # 用正确的驱动重新打开
         self.driver = driver_class(self.port, self.baudrate, self.timeout, self.write_timeout)
-        if not self.driver.open():
-            self.last_error = f"无法用驱动 {driver_class.BRAND} 打开 {self.port}"
+        try:
+            if not self.driver.open():
+                self.last_error = f"无法用驱动 {driver_class.BRAND} 打开 {self.port}"
+                logger.warning(f"[{self.name}] {self.last_error}")
+                return False
+        except Exception as e:
+            self.last_error = f"驱动打开异常: {type(e).__name__}: {e}"
+            logger.error(f"[{self.name}] {self.last_error}")
             return False
 
-        # 初始化
-        if not self.driver.initialize():
-            self.last_error = f"模块 {self.port} 初始化失败"
+        # Step 5: 初始化模块
+        try:
+            if not self.driver.initialize():
+                self.last_error = f"模块 {self.port} 初始化失败"
+                logger.warning(f"[{self.name}] {self.last_error}")
+                self.driver.close()
+                return False
+        except Exception as e:
+            self.last_error = f"初始化异常: {type(e).__name__}: {e}"
+            logger.error(f"[{self.name}] {self.last_error}")
             self.driver.close()
             return False
 
-        # 读取模块信息
-        self._read_modem_info()
+        # Step 6: 读取模块信息
+        try:
+            self._read_modem_info()
+        except Exception as e:
+            logger.error(f"[{self.name}] 读取模块信息异常: {type(e).__name__}: {e}")
+
         self.is_online = True
         self.is_initialized = True
         self.last_communication = datetime.now(timezone.utc)
 
-        logger.info(f"[{self.name}] 模块连接成功: {brand} {model} (IMEI: {self.info.get('imei', 'N/A')})")
+        logger.info(
+            f"[{self.name}] ✅ 模块连接成功: "
+            f"{brand} {model} (IMEI: {self.info.get('imei', 'N/A')})"
+        )
         return True
 
     def disconnect(self):
@@ -120,31 +158,65 @@ class ModemInstance:
         self.is_initialized = False
 
     def _identify_model(self, driver):
-        """识别模块型号"""
+        """识别模块型号（增强版，支持更多品牌型号）"""
+        # 优先用 +CGMM
         model = driver.get_model()
-        if not model:
-            # 尝试从ATI中提取
-            ati = driver.send_at_raw('ATI')
-            for line in ati['response'].split('\n'):
-                line = line.strip()
-                if any(kw in line.upper() for kw in ['EC20', 'EC25', 'EG25', 'SIM7600',
-                                                       'A7600', 'ME909', 'ME906', 'EC200']):
-                    model = line
-                    break
-        return model or 'Unknown'
+        if model:
+            return model
+
+        # 尝试从 ATI 中提取
+        ati = driver.send_at_raw('ATI', timeout=3)
+        response = ati.get('response', '') if isinstance(ati, dict) else ''
+        if isinstance(ati, dict) and ati.get('success'):
+            response = ati['response']
+        else:
+            response = str(ati)
+
+        known_models = [
+            # Quectel
+            'EC20', 'EC25', 'EG25', 'EC200', 'EG91', 'EC21', 'BG95', 'BG96',
+            'RG500', 'RG502', 'RM500', 'RM502', 'RG255', 'EG12',
+            # SIMCom
+            'SIM7600', 'SIM7600E', 'A7600', 'SIM7000', 'SIM800', 'SIM900',
+            'A7670', 'A7680',
+            # Huawei
+            'ME909', 'ME906', 'MU609', 'MH5000',
+        ]
+
+        for line in response.split('\n'):
+            line_upper = line.strip().upper()
+            for kw in known_models:
+                if kw.upper() in line_upper:
+                    logger.info(f"[{self.port if hasattr(self,'port') else '?'}] ATI 识别到型号: {kw}")
+                    return kw
+        return 'Unknown'
 
     def _identify_brand(self, model, driver):
-        """识别品牌"""
+        """识别品牌（增强版，支持 5G 模块）"""
         model_upper = model.upper() if model else ''
-        if any(kw in model_upper for kw in ['EC', 'EG', 'QUECTEL', 'BG']):
+
+        # Quectel 系列
+        quectel_prefixes = ['EC', 'EG', 'RG', 'RM', 'BG', 'AG', 'UC', 'QUECTEL']
+        if any(model_upper.startswith(p) for p in quectel_prefixes) or 'QUECTEL' in model_upper:
             return 'Quectel'
-        elif any(kw in model_upper for kw in ['SIM', 'A7600']):
+
+        # SIMCom 系列
+        simcom_prefixes = ['SIM', 'A76', 'A767', 'A768']
+        if any(model_upper.startswith(p) for p in simcom_prefixes):
             return 'SIMCom'
-        elif any(kw in model_upper for kw in ['ME', 'MU', 'MH', 'HUAWEI']):
+
+        # 华为
+        huawei_prefixes = ['ME', 'MU', 'MH', 'HUAWEI']
+        if any(model_upper.startswith(p) for p in huawei_prefixes):
             return 'Huawei'
-        else:
-            # 默认尝试Quectel（最常见的4G模块品牌）
-            return 'Quectel'
+
+        # ZTE
+        if any(p in model_upper for p in ['ZM', 'ZTE']):
+            return 'Quectel'  # ZTE 很多用移远芯片
+
+        # 默认 Quectel（市场上最常见的 4G 模块品牌）
+        logger.info(f"未识别品牌 '{model}'，默认使用 Quectel 驱动")
+        return 'Quectel'
 
     def _select_driver(self, brand, model):
         """根据品牌选择驱动"""
@@ -241,12 +313,17 @@ class ModemInstance:
                 elif decoded.startswith('+CME ERROR') or decoded.startswith('+CMS ERROR'):
                     logger.warning(f"[{self.name}] 模块错误: {decoded}")
 
-            except serial.SerialException as e:
-                logger.error(f"[{self.name}] 串口异常: {e}")
+            except (serial.SerialException, BrokenPipeError, PermissionError,
+                    OSError, IOError) as e:
+                logger.error(
+                    f"[{self.name}] 串口异常 ({type(e).__name__}): {e}，标记离线"
+                )
                 self.is_online = False
                 time.sleep(5)
             except Exception as e:
-                logger.error(f"[{self.name}] 监听异常: {e}")
+                logger.error(
+                    f"[{self.name}] 监听异常 ({type(e).__name__}): {e}，继续监听"
+                )
                 time.sleep(1)
 
         logger.info(f"[{self.name}] 短信监听已停止")
@@ -368,59 +445,185 @@ class ModemManager:
                 logger.error(f"全局短信回调异常: {e}")
 
     def scan_ports(self):
-        """扫描所有可用串口"""
+        """扫描所有可用串口（按优先级排序 + 忽略配置）"""
         serial_config = self.config_manager.serial_config
         scan_patterns = serial_config.get('scan_ports', ['/dev/ttyUSB*', '/dev/ttyACM*'])
+        preferred = serial_config.get('preferred_ports', [
+            '/dev/ttyUSB2', '/dev/ttyUSB3', '/dev/ttyUSB1', '/dev/ttyUSB4'
+        ])
+        ignore = set(serial_config.get('ignore_ports', ['/dev/ttyUSB0']))
         default_port = serial_config.get('default_port', '/dev/ttyUSB2')
 
-        found_ports = []
+        logger.info(f"开始扫描串口... (忽略端口: {sorted(ignore)})")
+
+        # 收集所有匹配的端口
+        found_set = set()
         for pattern in scan_patterns:
-            matches = glob.glob(pattern)
-            found_ports.extend(matches)
+            try:
+                matches = glob.glob(pattern)
+                found_set.update(matches)
+            except Exception as e:
+                logger.warning(f"扫描模式 {pattern} 异常: {type(e).__name__}: {e}")
 
         # 确保默认端口在列表中
-        if default_port not in found_ports and os.path.exists(default_port):
-            found_ports.append(default_port)
+        if default_port not in found_set and os.path.exists(default_port):
+            found_set.add(default_port)
 
-        # 去重并排序
-        found_ports = sorted(set(found_ports))
-        logger.info(f"扫描到 {len(found_ports)} 个串口: {found_ports}")
-        return found_ports
+        # 过滤掉忽略的端口
+        found_set -= ignore
+
+        # 按优先级排序：preferred 中的排前面，其余按字母序
+        def sort_key(p):
+            try:
+                return (0, preferred.index(p)) if p in preferred else (1, p)
+            except ValueError:
+                return (1, p)
+
+        sorted_ports = sorted(found_set, key=sort_key)
+        logger.info(f"扫描到 {len(sorted_ports)} 个可用串口: {sorted_ports}")
+        return sorted_ports
 
     def try_connect_port(self, port, baudrate=115200):
-        """尝试连接一个串口并识别是否为4G模块"""
+        """尝试连接一个串口并识别是否为4G模块的AT口
+
+        流程：
+        1. 打开串口
+        2. 发送 AT 测试是否响应 OK
+        3. 发送 ATI/AT+CGMM 获取品牌型号
+        4. 确认是真正的 AT 口后加入模块管理
+        5. 任何步骤失败则跳过该端口，继续下一个
+        """
+        logger.info(f"── 正在探测端口: {port} ──")
+
+        # 检查是否已被管理
         with self._lock:
-            # 检查是否已被管理
             for modem in self._modems.values():
                 if modem.port == port:
+                    logger.info(f"[{port}] 端口已在管理中 (模块: {modem.name})，跳过")
                     return modem
 
-        # 创建临时实例尝试连接
-        instance = ModemInstance(port, baudrate=baudrate)
-        if instance.connect():
-            with self._lock:
-                self._modems[instance.module_id] = instance
-            instance.add_sms_callback(self._on_global_sms)
-            instance.start_listening()
-            self._save_modem_to_db(instance)
-            return instance
-        else:
-            logger.info(f"端口 {port} 不是有效的4G模块: {instance.last_error}")
+        # Step 1: 打开串口
+        base_driver = BaseModemDriver(port, baudrate, self.config_manager.get('serial.timeout', 3))
+        if not base_driver.open():
+            logger.info(f"[{port}] 打开失败，继续扫描其它端口...")
             return None
 
+        logger.info(f"[{port}] 打开成功")
+
+        # Step 2: AT 测试
+        try:
+            result = base_driver.send_at_raw('AT', timeout=2)
+            if not result['success']:
+                logger.info(f"[{port}] AT 测试失败（响应: {result.get('response','')[:100]}），不是有效的 AT 口，跳过")
+                base_driver.close()
+                return None
+            logger.info(f"[{port}] AT 测试成功")
+        except Exception as e:
+            logger.info(f"[{port}] AT 测试异常: {type(e).__name__}: {e}，跳过")
+            base_driver.close()
+            return None
+
+        # Step 3: 获取品牌型号
+        try:
+            model = self._identify_model(base_driver)
+            brand = self._identify_brand(model, base_driver)
+            logger.info(f"[{port}] 识别品牌: {brand}, 型号: {model}")
+        except Exception as e:
+            logger.warning(f"[{port}] 识别品牌型号异常: {type(e).__name__}: {e}，使用默认品牌")
+            model = 'Unknown'
+            brand = 'Generic'
+
+        # Step 4: 获取 IMEI（进一步验证是真正的 AT 口）
+        try:
+            imei = base_driver.get_imei()
+            logger.info(f"[{port}] IMEI: {imei or 'N/A'}")
+        except Exception as e:
+            logger.warning(f"[{port}] 获取 IMEI 异常: {type(e).__name__}: {e}")
+            imei = ''
+
+        # 关闭临时驱动
+        base_driver.close()
+        time.sleep(0.3)
+
+        # Step 5: 用正确驱动重新连接
+        driver_class = self._select_driver(brand, model)
+        instance = ModemInstance(port, baudrate=baudrate,
+                                 timeout=self.config_manager.get('serial.timeout', 3))
+        instance.driver = driver_class(port, baudrate,
+                                       self.config_manager.get('serial.timeout', 3))
+
+        if not instance.driver.open():
+            logger.warning(f"[{port}] 驱动 {driver_class.BRAND} 打开失败，跳过")
+            return None
+
+        # 初始化
+        if not instance.driver.initialize():
+            logger.warning(f"[{port}] 模块初始化失败，跳过")
+            instance.driver.close()
+            return None
+
+        # 读取完整模块信息
+        instance._read_modem_info()
+        instance.is_online = True
+        instance.is_initialized = True
+        instance.last_communication = datetime.now(timezone.utc)
+
+        logger.info(
+            f"[{port}] ✅ 模块加入管理: "
+            f"{instance.info.get('brand','')} {instance.info.get('model','')} "
+            f"IMEI={instance.info.get('imei','N/A')}"
+        )
+
+        # 注册到管理器
+        with self._lock:
+            self._modems[instance.module_id] = instance
+        instance.add_sms_callback(self._on_global_sms)
+        instance.start_listening()
+        self._save_modem_to_db(instance)
+
+        return instance
+
     def auto_discover(self):
-        """自动发现并连接所有4G模块"""
+        """自动发现并连接所有4G模块（容错增强版）
+
+        每个端口独立处理，任何一个端口异常不会影响其它端口。
+        """
         serial_config = self.config_manager.serial_config
         baudrate = serial_config.get('baudrate', 115200)
+        auto_scan = serial_config.get('auto_scan', True)
+
+        if not auto_scan:
+            logger.info("auto_scan 已禁用，跳过自动发现")
+            return []
 
         ports = self.scan_ports()
+        if not ports:
+            logger.info("未扫描到任何串口")
+            self._restore_from_db()
+            return []
+
         connected = []
+        failed = []
 
         for port in ports:
-            instance = self.try_connect_port(port, baudrate)
-            if instance:
-                connected.append(instance)
-                logger.info(f"自动发现模块: {port} -> {instance.info.get('brand')} {instance.info.get('model')}")
+            try:
+                instance = self.try_connect_port(port, baudrate)
+                if instance:
+                    connected.append(instance)
+                else:
+                    failed.append(port)
+            except Exception as e:
+                logger.error(
+                    f"[{port}] 探测异常（不影响其它端口）: "
+                    f"{type(e).__name__}: {e}"
+                )
+                failed.append(port)
+                continue  # ← 关键：继续扫描下一个端口
+
+        logger.info(
+            f"自动发现完成: 成功={len(connected)} 个, "
+            f"失败={len(failed)} 个 ({failed if failed else '无'})"
+        )
 
         # 恢复数据库中的模块
         self._restore_from_db()
@@ -448,20 +651,38 @@ class ModemManager:
             modem = self._modems.get(module_id)
             if modem:
                 modem.name = name
-                self._update_modem_in_db(modem)
+                try:
+                    self._update_modem_in_db(modem)
+                except Exception as e:
+                    logger.warning(f"更新模块备注到数据库失败: {e}")
 
     def reconnect_modem(self, module_id):
-        """重连指定模块"""
+        """重连指定模块（增强异常处理）"""
         with self._lock:
             modem = self._modems.get(module_id)
             if not modem:
+                logger.warning(f"重连失败: 模块 {module_id} 不存在")
                 return False
 
-        modem.disconnect()
+        logger.info(f"[{modem.name}] 正在重连...")
+        try:
+            modem.disconnect()
+        except Exception as e:
+            logger.warning(f"[{modem.name}] 断开旧连接异常: {type(e).__name__}: {e}")
+
         time.sleep(2)
-        success = modem.connect()
+        try:
+            success = modem.connect()
+        except Exception as e:
+            logger.error(f"[{modem.name}] 重连异常: {type(e).__name__}: {e}")
+            success = False
+
         if success:
             modem.start_listening()
+            logger.info(f"[{modem.name}] ✅ 重连成功")
+        else:
+            logger.warning(f"[{modem.name}] ❌ 重连失败")
+
         return success
 
     def disable_modem(self, module_id):
@@ -531,22 +752,31 @@ class ModemManager:
             self._modems.clear()
 
     def _auto_reconnect_loop(self):
-        """自动重连监控循环"""
+        """自动重连监控循环（增强异常处理）"""
         serial_config = self.config_manager.serial_config
         interval = serial_config.get('reconnect_interval', 10)
 
+        logger.info(f"自动重连监控已启动 (间隔={interval}s)")
         while not self._stop_event.is_set():
             time.sleep(interval)
             with self._lock:
                 for mid, modem in list(self._modems.items()):
-                    if not modem.is_online and modem.driver and not modem.driver.is_open():
-                        logger.info(f"[{modem.name}] 尝试自动重连...")
+                    if not modem.is_online:
+                        logger.info(f"[{modem.name}] 检测到离线，尝试自动重连...")
                         try:
                             if modem.connect():
                                 modem.start_listening()
-                                logger.info(f"[{modem.name}] 自动重连成功")
+                                logger.info(f"[{modem.name}] ✅ 自动重连成功")
+                            else:
+                                logger.info(
+                                    f"[{modem.name}] 自动重连失败 "
+                                    f"({modem.last_error})，将在 {interval}s 后重试"
+                                )
                         except Exception as e:
-                            logger.error(f"[{modem.name}] 自动重连失败: {e}")
+                            logger.error(
+                                f"[{modem.name}] 自动重连异常 "
+                                f"({type(e).__name__}): {e}"
+                            )
 
     def _save_modem_to_db(self, instance):
         """保存模块信息到数据库"""
