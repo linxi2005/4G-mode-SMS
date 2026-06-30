@@ -14,6 +14,7 @@ class SMS(db.Model):
     modem_model = db.Column(db.String(64), nullable=True)
     imei = db.Column(db.String(32), nullable=True, index=True)
     sms_index = db.Column(db.Integer, nullable=True)
+    storage = db.Column(db.String(8), nullable=True)  # ME/SM
     phone = db.Column(db.String(32), nullable=False, index=True)
     receive_time = db.Column(db.DateTime, nullable=False, index=True)
     content = db.Column(db.Text, nullable=False)
@@ -36,6 +37,7 @@ class SMS(db.Model):
             'modem_model': self.modem_model,
             'imei': self.imei,
             'sms_index': self.sms_index,
+            'storage': self.storage,
             'phone': self.phone,
             'receive_time': self.receive_time.isoformat() if self.receive_time else None,
             'content': self.content,

@@ -85,8 +85,10 @@ class MailForwarder:
                 sms.forwarded = True
                 sms.forward_count = (sms.forward_count or 0) + 1
                 sms.last_forward_time = datetime.now(timezone.utc)
+                logger.info(f"✅ 短信转发成功 (SMS={sms_id})")
             else:
                 sms.forward_count = (sms.forward_count or 0) + 1
+                logger.warning(f"⚠ 短信转发部分失败 (SMS={sms_id})")
 
             session.commit()
             session.close()

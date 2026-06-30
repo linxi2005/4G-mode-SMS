@@ -369,7 +369,7 @@ class ModemInstance:
         self._stop_event.set()
 
     def _listen_loop(self):
-        """短信监听循环"""
+        """短信监听循环 — 持续读取串口，处理所有非请求通知"""
         logger.info(f"[{self.name}] 开始监听短信...")
         while not self._stop_event.is_set():
             try:
@@ -385,10 +385,24 @@ class ModemInstance:
                 if not decoded:
                     continue
 
-                # 检查 +CMT:
-                if '+CMT:' in decoded:
+                # 处理 +CMTI: 新短信索引通知 (最常用的通知方式)
+                if '+CMTI:' in decoded:
                     logger.info(f"[{self.name}] 收到新短信通知: {decoded}")
+                    self._handle_cmti(decoded)
+
+                # 处理 +CMT: 直接短信推送通知 (部分模块使用)
+                elif '+CMT:' in decoded:
+                    logger.info(f"[{self.name}] 收到直接短信推送: {decoded}")
                     self._handle_cmt(decoded)
+
+                # 处理 +CDS: 短信状态报告
+                elif '+CDS:' in decoded:
+                    logger.info(f"[{self.name}] 收到短信状态报告: {decoded}")
+
+                # 处理 +CREG/+CGREG: 网络状态变化（忽略，但记录 debug）
+                elif decoded.startswith('+CREG:') or decoded.startswith('+CGREG:'):
+                    logger.debug(f"[{self.name}] 网络状态变化: {decoded}")
+
                 elif decoded in ('OK', 'ERROR'):
                     continue
                 elif decoded.startswith('+CME ERROR') or decoded.startswith('+CMS ERROR'):
@@ -409,9 +423,197 @@ class ModemInstance:
 
         logger.info(f"[{self.name}] 短信监听已停止")
 
+    def _handle_cmti(self, cmti_line):
+        """处理 +CMTI: 新短信索引通知
+        
+        格式: +CMTI: "ME",8  或  +CMTI: "SM",8
+        
+        流程:
+        1. 解析短信存储位置和索引
+        2. 发送 AT+CMGR=<index> 读取短信
+        3. 解析短信内容（自动识别 UCS2/GSM7 编码）
+        4. 触发回调
+        """
+        from utils.helpers import parse_sms_time, decode_ucs2
+
+        # 解析 +CMTI: "ME",8 或 +CMTI: "SM",8
+        match = re.match(r'\+CMTI:\s*"([^"]*)"\s*,\s*(\d+)', cmti_line, re.IGNORECASE)
+        if not match:
+            logger.warning(f"[{self.name}] 无法解析 CMTI 通知: {cmti_line}")
+            return
+
+        storage = match.group(1)  # "ME" 或 "SM"
+        sms_index = int(match.group(2))
+        logger.info(f"[{self.name}] 新短信通知: 存储={storage}, 索引={sms_index}")
+
+        # 读取短信内容
+        try:
+            result = self.driver.send_at_raw(f'AT+CMGR={sms_index}', timeout=10)
+        except Exception as e:
+            logger.error(f"[{self.name}] 读取短信索引 {sms_index} 失败: {e}")
+            return
+
+        if not result.get('success'):
+            logger.warning(f"[{self.name}] CMGR 读取失败: {result.get('error', '未知错误')}")
+            return
+
+        response = result.get('response', '')
+        logger.debug(f"[{self.name}] CMGR={sms_index} 响应: {response[:300]}")
+
+        # 解析 CMGR 响应
+        sms_data = self._parse_cmgr_response(response, sms_index)
+        if not sms_data:
+            logger.warning(f"[{self.name}] 无法解析 CMGR 响应，索引={sms_index}")
+            return
+
+        # 自动解码 UCS2 内容
+        content = sms_data.get('content', '')
+        encoding = sms_data.get('encoding', 'GSM7')
+        if encoding.upper() == 'UCS2' or self._is_ucs2_hex(content):
+            decoded = decode_ucs2(content)
+            if decoded and decoded != content:
+                logger.info(f"[{self.name}] UCS2 解码: {content[:40]}... -> {decoded[:40]}...")
+                sms_data['content'] = decoded
+                sms_data['encoding'] = 'UCS2'
+
+        sms_data['raw_cmti'] = cmti_line
+        sms_data['sms_index'] = sms_index
+
+        logger.info(
+            f"[{self.name}] 短信解析完成: "
+            f"号码={sms_data.get('phone')}, "
+            f"时间={sms_data.get('receive_time')}, "
+            f"编码={sms_data.get('encoding')}, "
+            f"内容={sms_data.get('content', '')[:30]}..."
+        )
+
+        self._on_sms_received(sms_data)
+
+    def _parse_cmgr_response(self, response, sms_index):
+        """解析 AT+CMGR 响应
+        
+        CMGR 响应格式（文本模式 CMGF=1）:
+        +CMGR: "REC UNREAD","+8613800138000",,"24/06/30,16:30:45+32"
+        短信正文内容
+        
+        或 PDU 模式 (CMGF=0):
+        +CMGR: 1,,26
+        0791...
+        """
+        if not response:
+            return None
+
+        lines = response.split('\n')
+        sms_data = {
+            'phone': '',
+            'receive_time': None,
+            'content': '',
+            'encoding': 'GSM7',
+            'status': 'REC UNREAD',
+        }
+
+        # 解析头行: +CMGR: <stat>,<oa>,[<alpha>],<scts> 或 PDU 模式
+        for line in lines:
+            line_stripped = line.strip()
+            if not line_stripped or line_stripped in ('OK', 'ERROR'):
+                continue
+            if line_stripped.startswith('AT+'):
+                continue
+
+            cmgr_match = re.match(
+                r'\+CMGR:\s*(.+)$',
+                line_stripped,
+                re.IGNORECASE
+            )
+            if cmgr_match:
+                params_str = cmgr_match.group(1)
+
+                # 文本模式: "REC UNREAD","+86138...",,"24/06/30,16:30:45+32"
+                if params_str.startswith('"'):
+                    parts = self._split_quoted_csv(params_str)
+                    if len(parts) >= 1:
+                        sms_data['status'] = parts[0].strip('"')
+                    if len(parts) >= 2:
+                        phone_part = parts[1].strip('"')
+                        # 处理国际号码格式 "+8613800138000"
+                        sms_data['phone'] = phone_part
+                    if len(parts) >= 4:
+                        time_str = parts[3].strip('"')
+                        if time_str:
+                            from utils.helpers import parse_sms_time
+                            sms_data['receive_time'] = parse_sms_time(time_str)
+                    else:
+                        # 尝试 date 在第三个位置（当 alpha 为空时）
+                        if len(parts) >= 3 and parts[2].strip('"'):
+                            time_str = parts[2].strip('"')
+                            if re.match(r'\d{2}/\d{2}/\d{2}', time_str):
+                                from utils.helpers import parse_sms_time
+                                sms_data['receive_time'] = parse_sms_time(time_str)
+
+                # PDU 模式: 1,,26
+                else:
+                    pdu_parts = [p.strip() for p in params_str.split(',')]
+                    if len(pdu_parts) >= 1 and pdu_parts[0].isdigit():
+                        sms_data['status'] = pdu_parts[0]
+                    if len(pdu_parts) >= 3 and pdu_parts[2].isdigit():
+                        sms_data['pdu_length'] = int(pdu_parts[2])
+                    sms_data['encoding'] = 'PDU'
+
+                continue
+
+            # 非头行 = 短信正文
+            if not line_stripped.startswith('+'):
+                sms_data['content'] += line_stripped
+
+        sms_data['content'] = sms_data['content'].strip()
+
+        # 如果内容看起来是 PDU 十六进制，标记为 PDU 编码
+        if self._is_pdu_hex(sms_data['content']):
+            sms_data['encoding'] = 'PDU'
+
+        return sms_data if sms_data['content'] else None
+
+    def _split_quoted_csv(self, text):
+        """分割带引号的CSV格式字符串
+        
+        "REC UNREAD","+8613800138000",,"24/06/30,16:30:45+32"
+        -> ['REC UNREAD', '+8613800138000', '', '24/06/30,16:30:45+32']
+        """
+        parts = []
+        current = ''
+        in_quotes = False
+        for ch in text:
+            if ch == '"':
+                in_quotes = not in_quotes
+            elif ch == ',' and not in_quotes:
+                parts.append(current)
+                current = ''
+            else:
+                current += ch
+        parts.append(current)
+        return parts
+
+    @staticmethod
+    def _is_ucs2_hex(text):
+        """判断字符串是否可能是 UCS2 十六进制编码"""
+        if not text or len(text) < 4:
+            return False
+        cleaned = text.replace(' ', '').replace('\n', '').replace('\r', '')
+        if len(cleaned) % 4 != 0:
+            return False
+        return bool(re.match(r'^[0-9A-Fa-f]+$', cleaned))
+
+    @staticmethod
+    def _is_pdu_hex(text):
+        """判断字符串是否可能是 PDU 十六进制"""
+        if not text or len(text) < 10:
+            return False
+        cleaned = text.replace(' ', '').replace('\n', '').replace('\r', '')
+        return bool(re.match(r'^[0-9A-Fa-f]+$', cleaned)) and len(cleaned) >= 10
+
     def _handle_cmt(self, cmt_line):
-        """处理+CMT通知"""
-        from utils.helpers import parse_cmt, parse_sms_time
+        """处理+CMT通知（直接短信推送）"""
+        from utils.helpers import parse_cmt, parse_sms_time, decode_ucs2
 
         phone, date_str = parse_cmt(cmt_line)
 
@@ -430,20 +632,39 @@ class ModemInstance:
         except Exception as e:
             logger.error(f"[{self.name}] 读取短信内容失败: {e}")
 
+        # UCS2 解码
+        encoding = 'GSM7'
+        if self._is_ucs2_hex(content):
+            decoded = decode_ucs2(content)
+            if decoded and decoded != content:
+                content = decoded
+                encoding = 'UCS2'
+
         receive_time = parse_sms_time(date_str)
 
         sms_data = {
             'phone': phone,
             'receive_time': receive_time,
             'content': content,
-            'encoding': 'GSM7',
+            'encoding': encoding,
             'raw_cmt': cmt_line,
         }
 
         self._on_sms_received(sms_data)
 
     def sync_sms(self):
-        """同步模块中的所有短信"""
+        """同步模块中的所有短信（使用 CMGL 列表 + CMGR 读取每条）
+        
+        统一返回格式: {
+            'phone': str,       # 发件号码
+            'receive_time': datetime,  # 接收时间
+            'content': str,     # 短信内容
+            'encoding': str,    # UCS2/GSM7/PDU
+            'index': int,       # 模块存储索引
+            'status': str/int,  # REC UNREAD / REC READ
+            'storage': str,     # 存储位置 ME/SM
+        }
+        """
         if not self.is_online or not self.driver:
             return []
 
@@ -452,14 +673,84 @@ class ModemInstance:
             # 列出所有短信
             raw_messages = self.driver.list_sms('ALL')
             for msg in raw_messages:
-                # 读取完整短信内容
-                detail = self.driver.read_sms(msg['index'])
-                if detail:
-                    detail['index'] = msg['index']
-                    detail['status'] = msg.get('status', 0)
-                    messages.append(detail)
+                index = msg.get('index')
+                if not index:
+                    continue
+
+                # 用 CMGR 读取完整内容
+                try:
+                    result = self.driver.send_at_raw(f'AT+CMGR={index}', timeout=10)
+                    if result.get('success'):
+                        detail = self._parse_cmgr_response(result.get('response', ''), index)
+                        if detail:
+                            # 统一字段名: phone（兼容 sms_engine 读取）
+                            detail['index'] = index
+                            detail['status'] = msg.get('status', 0)
+                            detail['storage'] = msg.get('storage', 'ME')
+                            # 确保 sender 别名存在（兼容旧代码）
+                            detail['sender'] = detail.get('phone', '')
+
+                            # UCS2 解码
+                            content = detail.get('content', '')
+                            if self._is_ucs2_hex(content):
+                                from utils.helpers import decode_ucs2
+                                decoded = decode_ucs2(content)
+                                if decoded and decoded != content:
+                                    detail['content'] = decoded
+                                    detail['encoding'] = 'UCS2'
+
+                            messages.append(detail)
+                except Exception as e:
+                    logger.warning(f"[{self.name}] 读取短信索引 {index} 失败: {e}")
         except Exception as e:
             logger.error(f"[{self.name}] 同步短信失败: {e}")
+
+        return messages
+
+    def sync_unread_sms(self):
+        """同步未读短信（CMGL REC UNREAD）- 用于定时补扫
+        
+        返回格式与 sync_sms 一致。CMGR 读取后 EC20 自动标记为 REC READ。
+        """
+        if not self.is_online or not self.driver:
+            return []
+
+        messages = []
+        try:
+            # 列出未读短信
+            raw_messages = self.driver.list_sms('REC UNREAD')
+            if not raw_messages:
+                return []
+
+            logger.info(f"[{self.name}] 发现 {len(raw_messages)} 条未读短信，开始补扫...")
+            for msg in raw_messages:
+                index = msg.get('index')
+                if not index:
+                    continue
+
+                try:
+                    result = self.driver.send_at_raw(f'AT+CMGR={index}', timeout=10)
+                    if result.get('success'):
+                        detail = self._parse_cmgr_response(result.get('response', ''), index)
+                        if detail:
+                            detail['index'] = index
+                            detail['status'] = msg.get('status', 0)
+                            detail['storage'] = msg.get('storage', 'ME')
+                            detail['sender'] = detail.get('phone', '')
+
+                            content = detail.get('content', '')
+                            if self._is_ucs2_hex(content):
+                                from utils.helpers import decode_ucs2
+                                decoded = decode_ucs2(content)
+                                if decoded and decoded != content:
+                                    detail['content'] = decoded
+                                    detail['encoding'] = 'UCS2'
+
+                            messages.append(detail)
+                except Exception as e:
+                    logger.warning(f"[{self.name}] 补扫读取短信索引 {index} 失败: {e}")
+        except Exception as e:
+            logger.error(f"[{self.name}] 未读短信补扫失败: {e}")
 
         return messages
 

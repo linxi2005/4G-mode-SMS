@@ -160,30 +160,40 @@ class BaseModemDriver:
                 self._is_open = False
                 raise ModemNotRespondingError(f"[{self.port}] 串口通信错误: {e}")
 
-    def send_at_raw(self, command, timeout=None):
-        """发送原始AT指令并返回结构化结果
+    def send_at_raw(self, command, timeout=None, retries=2):
+        """发送原始AT指令并返回结构化结果，支持超时重试
 
         Returns:
             dict: {'success': bool, 'response': str, 'error': str or None}
         """
-        try:
-            response = self.send_at(command, timeout=timeout)
-            # 检查是否成功
-            if 'OK' in response.split('\n')[-2:]:
-                return {'success': True, 'response': response, 'error': None}
-            elif 'ERROR' in response:
-                return {'success': False, 'response': response, 'error': 'AT ERROR'}
-            elif '+CME ERROR' in response:
-                err_match = re.search(r'\+CME ERROR:\s*(.+)', response)
-                error_msg = err_match.group(1) if err_match else 'CME ERROR'
-                return {'success': False, 'response': response, 'error': error_msg}
-            else:
-                return {'success': True, 'response': response, 'error': None}
-        except ModemNotRespondingError as e:
-            return {'success': False, 'response': '', 'error': str(e)}
-        except Exception as e:
-            logger.error(f"[{self.port}] send_at_raw异常: {e}")
-            return {'success': False, 'response': '', 'error': str(e)}
+        last_error = None
+        for attempt in range(retries):
+            try:
+                response = self.send_at(command, timeout=timeout)
+                # 检查是否成功
+                if 'OK' in response.split('\n')[-2:]:
+                    return {'success': True, 'response': response, 'error': None}
+                elif 'ERROR' in response:
+                    last_error = 'AT ERROR'
+                    if '+CME ERROR' in response:
+                        err_match = re.search(r'\+CME ERROR:\s*(.+)', response)
+                        last_error = err_match.group(1) if err_match else 'CME ERROR'
+                elif '+CME ERROR' in response:
+                    err_match = re.search(r'\+CME ERROR:\s*(.+)', response)
+                    last_error = err_match.group(1) if err_match else 'CME ERROR'
+                else:
+                    return {'success': True, 'response': response, 'error': None}
+            except ModemNotRespondingError as e:
+                last_error = str(e)
+            except Exception as e:
+                logger.error(f"[{self.port}] send_at_raw异常 (attempt {attempt+1}/{retries}): {e}")
+                last_error = str(e)
+
+            if attempt < retries - 1:
+                logger.debug(f"[{self.port}] AT重试 ({attempt+1}/{retries}): {command} - {last_error}")
+                time.sleep(0.5)
+
+        return {'success': False, 'response': '', 'error': last_error or 'Unknown error'}
 
     def send_sms_text(self, phone, content):
         """发送文本模式短信"""
@@ -359,9 +369,25 @@ class BaseModemDriver:
         result = self.send_at_raw('AT+CMGF=1')
         return result['success']
 
+    def set_cpms(self, read_storage='MT', send_storage='MT', new_storage='MT'):
+        """设置短信首选存储
+        
+        AT+CPMS="MT","MT","MT" — 读写新短信统一使用 MT (模块+SIM卡)
+        """
+        result = self.send_at_raw(f'AT+CPMS="{read_storage}","{send_storage}","{new_storage}"')
+        return result['success']
+
     def set_sms_notification(self):
-        """开启短信通知"""
-        result = self.send_at_raw('AT+CNMI=2,2,0,0,0')
+        """开启短信通知（新短信保存到模块 + 输出 CMTI 索引通知）
+        
+        AT+CNMI=2,1,0,0,0:
+        - mode=2: 直接缓存到模块，输出 +CMTI: <mem>,<index>
+        - mt=1: 收到短信后保存到模块并输出通知
+        - bm=0, ds=0, bfr=0: 不发送广播/状态报告通知
+        
+        使用 +CMTI 而非 +CMT，确保短信持久保存到模块存储，重启不丢失。
+        """
+        result = self.send_at_raw('AT+CNMI=2,1,0,0,0')
         return result['success']
 
     def list_sms(self, status='ALL'):
@@ -469,26 +495,46 @@ class BaseModemDriver:
     # ---- 初始化 ----
 
     def initialize(self):
-        """初始化模块：检查在线、设置文本模式和短信通知"""
+        """初始化模块：标准 EC20 短信就绪流程
+        
+        序列: ATE0 → CMGF=1 → CPMS="MT","MT","MT" → CNMI=2,1,0,0,0
+        
+        CNMI=2,1 确保短信先保存到模块存储再发 CMTI 通知，
+        防止 +CMT 直接推送模式导致短信不落存储、重启丢失。
+        """
         try:
-            # 基础AT测试
+            # 基础 AT 测试
             result = self.send_at_raw('AT', timeout=2)
             if not result['success']:
                 logger.warning(f"[{self.port}] AT测试失败，模块可能不在线")
                 return False
 
             # 关闭回显
-            self.send_at('ATE0', timeout=1)
+            self.send_at_raw('ATE0', timeout=1)
+            logger.debug(f"[{self.port}] ATE0 已设置")
 
             # 设置文本模式
             if not self.set_text_mode():
-                logger.warning(f"[{self.port}] 设置文本模式失败")
+                logger.warning(f"[{self.port}] 设置文本模式 (CMGF=1) 失败")
+            else:
+                logger.debug(f"[{self.port}] CMGF=1 已设置")
 
-            # 开启短信通知
+            # 设置短信存储位置
+            if not self.set_cpms('MT', 'MT', 'MT'):
+                logger.warning(f"[{self.port}] 设置短信存储 (CPMS) 失败")
+            else:
+                logger.debug(f"[{self.port}] CPMS=\"MT\",\"MT\",\"MT\" 已设置")
+
+            # 开启短信通知（CMTI 模式）
             if not self.set_sms_notification():
-                logger.warning(f"[{self.port}] 设置短信通知失败")
+                logger.warning(f"[{self.port}] 设置短信通知 (CNMI=2,1) 失败")
+            else:
+                logger.debug(f"[{self.port}] CNMI=2,1,0,0,0 已设置")
 
-            logger.info(f"[{self.port}] 模块初始化完成")
+            logger.info(
+                f"[{self.port}] 模块初始化完成 "
+                f"(CMGF=1, CPMS=MT, CNMI=2,1 → CMTI 通知模式)"
+            )
             return True
         except Exception as e:
             logger.error(f"[{self.port}] 初始化失败: {e}")
