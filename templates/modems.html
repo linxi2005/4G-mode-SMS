@@ -79,7 +79,12 @@ function loadModems() {
                 <div class="card p-3 h-100">
                     <div class="d-flex justify-content-between align-items-start mb-2">
                         <div>
-                            <h6 class="mb-1">${m.name || m.port}</h6>
+                            <h6 class="mb-1">
+                                ${m.name || m.port}
+                                <button class="btn btn-link btn-sm p-0 ms-1 text-muted" title="编辑备注" onclick="editName('${m.module_id}', '${(m.name || '').replace(/'/g, "\\'")}')">
+                                    <i class="fas fa-pencil-alt fa-xs"></i>
+                                </button>
+                            </h6>
                             <small class="text-muted">${m.brand} ${m.model}</small>
                         </div>
                         <span class="status-dot ${m.is_online ? 'status-online' : 'status-offline'}"></span>
@@ -95,7 +100,7 @@ function loadModems() {
                         <tr><td class="text-muted">漫游</td><td>${m.is_roaming ? '是' : '否'}</td></tr>
                     </table>
                     <div class="d-flex gap-1">
-                        <button class="btn btn-outline-info btn-sm flex-grow-1" onclick="editName('${m.module_id}', '${m.name}')"><i class="fas fa-edit"></i> 备注</button>
+                        <button class="btn btn-outline-info btn-sm flex-grow-1" onclick="restartModem('${m.module_id}')"><i class="fas fa-power-off"></i> 重启</button>
                         <button class="btn btn-outline-warning btn-sm flex-grow-1" onclick="reconnect('${m.module_id}')"><i class="fas fa-sync"></i> 重连</button>
                         <button class="btn btn-outline-danger btn-sm" onclick="removeModem('${m.module_id}')"><i class="fas fa-times"></i></button>
                     </div>
@@ -128,6 +133,21 @@ async function reconnect(moduleId) {
     const data = await resp.json();
     showToast(data.success ? '重连成功' : '重连失败', data.success?'success':'error');
     loadModems();
+}
+
+async function restartModem(moduleId) {
+    if (!confirm('确定重启该模块吗？重启后模块将自动重新上线。')) return;
+    showToast('模块正在重启...', 'info');
+    const resp = await fetch(`/api/modems/${moduleId}/restart`, {method:'POST'});
+    const data = await resp.json();
+    if (data.success) {
+        showToast('模块重启指令已发送，正在等待重新上线...', 'success');
+        // 等待一段时间后刷新状态
+        setTimeout(() => loadModems(), 8000);
+        setTimeout(() => loadModems(), 15000);
+    } else {
+        showToast('重启失败: ' + (data.error || '未知错误'), 'error');
+    }
 }
 
 async function removeModem(moduleId) {

@@ -99,18 +99,12 @@ class MailForwarder:
             return False
 
     def _send_email(self, subject, body, recipient):
-        """发送单封邮件"""
+        """发送单封邮件（统一入口，不会回退到发信邮箱）"""
         mail_config = self.config_manager.mail_config
 
         try:
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = subject
-            msg['From'] = mail_config.get('from_email', '')
-            msg['To'] = recipient
-
-            html_part = MIMEText(body, 'html', 'utf-8')
-            msg.attach(html_part)
-
+            from_email = mail_config.get('from_email', '')
+            sender_name = mail_config.get('sender_name', '')
             smtp_server = mail_config.get('smtp_server', '')
             smtp_port = mail_config.get('smtp_port', 587)
             use_ssl = mail_config.get('use_ssl', False)
@@ -122,6 +116,20 @@ class MailForwarder:
             if not smtp_server or not username:
                 return False, "SMTP配置不完整"
 
+            # 构建发件人名称
+            if sender_name and from_email:
+                from_display = f"{sender_name} <{from_email}>"
+            else:
+                from_display = from_email
+
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = subject
+            msg['From'] = from_display
+            msg['To'] = recipient
+
+            html_part = MIMEText(body, 'html', 'utf-8')
+            msg.attach(html_part)
+
             if use_ssl:
                 server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=timeout)
             else:
@@ -131,8 +139,10 @@ class MailForwarder:
                 server.starttls()
 
             server.login(username, password)
-            server.sendmail(username, recipient, msg.as_string())
+            # 发信人使用配置的 from_email，而非 smtp username
+            server.sendmail(from_email or username, recipient, msg.as_string())
             server.quit()
+            logger.info(f"邮件已发送: To={recipient}, Subject={subject}")
             return True, None
 
         except smtplib.SMTPAuthenticationError:
@@ -167,12 +177,25 @@ class MailForwarder:
             session.close()
 
     def test_send(self, recipient=None):
-        """发送测试邮件"""
+        """发送测试邮件
+        
+        优先使用传入的 recipient 参数，其次使用配置中的收件人列表第一个，
+        如果都没有则返回错误，绝不回退到发信邮箱。
+        """
         mail_config = self.config_manager.mail_config
-        test_recipient = recipient or mail_config.get('from_email', '')
 
-        if not test_recipient:
-            return False, "没有指定测试收件人"
+        # 确定测试收件人：参数 > 配置recipients[0] > 报错
+        if recipient:
+            test_recipient = recipient
+        else:
+            recipients = mail_config.get('recipients', [])
+            if recipients and len(recipients) > 0:
+                test_recipient = recipients[0]
+            else:
+                logger.warning("测试发送失败: 未配置收件邮箱")
+                return False, "请先在邮件设置中配置收件邮箱"
+
+        logger.info(f"测试邮件将发送至: {test_recipient}")
 
         variables = {
             'phone': '13800138000',

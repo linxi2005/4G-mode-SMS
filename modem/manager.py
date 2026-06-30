@@ -2,6 +2,7 @@
 """多模块管理器 - 管理所有4G模块的生命周期"""
 import os
 import re
+import json
 import glob
 import uuid
 import time
@@ -158,8 +159,43 @@ class ModemInstance:
         self.is_online = False
         self.is_initialized = False
 
-    def _identify_model(self, driver):
+    @staticmethod
+    def _identify_model_static(driver):
         """识别模块型号（增强版，支持更多品牌型号）"""
+        # 优先用 +CGMM
+        model = driver.get_model()
+        if model:
+            return model
+
+        # 尝试从 ATI 中提取
+        ati = driver.send_at_raw('ATI', timeout=3)
+        response = ati.get('response', '') if isinstance(ati, dict) else ''
+        if isinstance(ati, dict) and ati.get('success'):
+            response = ati['response']
+        else:
+            response = str(ati)
+
+        known_models = [
+            # Quectel
+            'EC20', 'EC25', 'EG25', 'EC200', 'EG91', 'EC21', 'BG95', 'BG96',
+            'RG500', 'RG502', 'RM500', 'RM502', 'RG255', 'EG12',
+            # SIMCom
+            'SIM7600', 'SIM7600E', 'A7600', 'SIM7000', 'SIM800', 'SIM900',
+            'A7670', 'A7680',
+            # Huawei
+            'ME909', 'ME906', 'MU609', 'MH5000',
+        ]
+
+        for line in response.split('\n'):
+            line_upper = line.strip().upper()
+            for kw in known_models:
+                if kw.upper() in line_upper:
+                    logger.info(f"ATI 识别到型号: {kw}")
+                    return kw
+        return 'Unknown'
+
+    def _identify_model(self, driver):
+        """实例方法 - 兼容旧调用"""
         # 优先用 +CGMM
         model = driver.get_model()
         if model:
@@ -192,7 +228,12 @@ class ModemInstance:
                     return kw
         return 'Unknown'
 
-    def _identify_brand(self, model, driver):
+    def _identify_model(self, driver):
+        """实例方法 - 兼容旧调用"""
+        return self._identify_model_static(driver)
+
+    @staticmethod
+    def _identify_brand_static(model, driver):
         """识别品牌（增强版，支持 5G 模块）"""
         model_upper = model.upper() if model else ''
 
@@ -219,8 +260,47 @@ class ModemInstance:
         logger.info(f"未识别品牌 '{model}'，默认使用 Quectel 驱动")
         return 'Quectel'
 
-    def _select_driver(self, brand, model):
+    def _identify_brand(self, model, driver):
+        """实例方法 - 兼容旧调用"""
+        model_upper = model.upper() if model else ''
+
+        # Quectel 系列
+        quectel_prefixes = ['EC', 'EG', 'RG', 'RM', 'BG', 'AG', 'UC', 'QUECTEL']
+        if any(model_upper.startswith(p) for p in quectel_prefixes) or 'QUECTEL' in model_upper:
+            return 'Quectel'
+
+        # SIMCom 系列
+        simcom_prefixes = ['SIM', 'A76', 'A767', 'A768']
+        if any(model_upper.startswith(p) for p in simcom_prefixes):
+            return 'SIMCom'
+
+        # 华为
+        huawei_prefixes = ['ME', 'MU', 'MH', 'HUAWEI']
+        if any(model_upper.startswith(p) for p in huawei_prefixes):
+            return 'Huawei'
+
+        # ZTE
+        if any(p in model_upper for p in ['ZM', 'ZTE']):
+            return 'Quectel'  # ZTE 很多用移远芯片
+
+        # 默认 Quectel（市场上最常见的 4G 模块品牌）
+        logger.info(f"未识别品牌 '{model}'，默认使用 Quectel 驱动")
+        return 'Quectel'
+
+    def _identify_brand(self, model, driver):
+        """实例方法 - 兼容旧调用"""
+        return self._identify_brand_static(model, driver)
+
+    @staticmethod
+    def _select_driver_static(brand, model):
         """根据品牌选择驱动"""
+        for cls in DRIVER_CLASSES:
+            if cls.BRAND == brand:
+                return cls
+        return BaseModemDriver
+
+    def _select_driver(self, brand, model):
+        """实例方法 - 兼容旧调用"""
         for cls in DRIVER_CLASSES:
             if cls.BRAND == brand:
                 return cls
@@ -424,6 +504,8 @@ class ModemInstance:
 class ModemManager:
     """多模块管理器 - 全局单例"""
 
+    MODEM_CONFIG_FILE = os.path.join('config', 'modem_config.json')
+
     def __init__(self, config_manager, db_session_factory=None):
         self.config_manager = config_manager
         self.db_session_factory = db_session_factory
@@ -432,6 +514,8 @@ class ModemManager:
         self._sms_callbacks = []
         self._monitor_thread = None
         self._stop_event = threading.Event()
+        # 确保 config 目录存在
+        os.makedirs('config', exist_ok=True)
 
     def add_sms_callback(self, callback):
         """添加全局短信接收回调"""
@@ -542,8 +626,8 @@ class ModemManager:
 
         # Step 3: 获取品牌型号
         try:
-            model = self._identify_model(base_driver)
-            brand = self._identify_brand(model, base_driver)
+            model = ModemInstance._identify_model_static(base_driver)
+            brand = ModemInstance._identify_brand_static(model, base_driver)
             logger.info(f"[{port}] 识别品牌: {brand}, 型号: {model}")
         except Exception as e:
             logger.warning(f"[{port}] 识别品牌型号异常: {type(e).__name__}: {e}，使用默认品牌")
@@ -563,7 +647,7 @@ class ModemManager:
         time.sleep(0.3)
 
         # Step 5: 用正确驱动重新连接
-        driver_class = self._select_driver(brand, model)
+        driver_class = ModemInstance._select_driver_static(brand, model)
         instance = ModemInstance(port, baudrate=baudrate,
                                  timeout=self.config_manager.get('serial.timeout', 3))
         instance.driver = driver_class(port, baudrate,
@@ -597,6 +681,8 @@ class ModemManager:
         instance.add_sms_callback(self._on_global_sms)
         instance.start_listening()
         self._save_modem_to_db(instance)
+        self._save_modem_config()
+        logger.info(f"模块配置已持久化到 {self.MODEM_CONFIG_FILE}")
 
         return instance
 
@@ -672,6 +758,10 @@ class ModemManager:
                     self._update_modem_in_db(modem)
                 except Exception as e:
                     logger.warning(f"更新模块备注到数据库失败: {e}")
+                self._save_modem_config()
+                logger.info(f"[{modem.name}] 备注已更新并持久化")
+            else:
+                logger.warning(f"更新备注失败: 模块 {module_id} 不存在")
 
     def reconnect_modem(self, module_id):
         """重连指定模块（增强异常处理）"""
@@ -702,8 +792,70 @@ class ModemManager:
 
         return success
 
+    def restart_modem(self, module_id):
+        """软重启指定模块 (AT+CFUN=1,1)
+        
+        流程：
+        1. 发送 AT+CFUN=1,1 触发模块软重启
+        2. 等待模块重新上线
+        3. 重新初始化（AT、短信配置等）
+        4. 恢复正常监听
+        """
+        modem = self.get_modem(module_id)
+        if not modem:
+            return {'success': False, 'error': '模块不存在'}
+
+        if not modem.is_online or not modem.driver:
+            return {'success': False, 'error': '模块不在线，无法重启'}
+
+        logger.info(f"[{modem.name}] 正在执行软重启 (AT+CFUN=1,1)...")
+
+        try:
+            # Step 1: 发送重启指令
+            result = modem.exec_at('AT+CFUN=1,1', timeout=5)
+            if not result.get('success'):
+                # 有些模块即使返回 ERROR 也实际执行了重启
+                logger.warning(f"[{modem.name}] CFUN=1,1 返回: {result}")
+
+            # Step 2: 标记离线，停止监听
+            modem.stop_listening()
+            modem.is_online = False
+
+            # Step 3: 等待模块重新上线（模块重启通常需要 5-15 秒）
+            logger.info(f"[{modem.name}] 等待模块重新上线...")
+            time.sleep(3)
+
+            # 关闭旧连接
+            try:
+                modem.driver.close()
+            except Exception:
+                pass
+
+            # Step 4: 重新连接并初始化
+            max_retries = 5
+            for attempt in range(1, max_retries + 1):
+                logger.info(f"[{modem.name}] 重新连接尝试 {attempt}/{max_retries}...")
+                try:
+                    if modem.connect():
+                        # 重新初始化完成
+                        modem.start_listening()
+                        logger.info(f"[{modem.name}] ✅ 模块重启成功，已恢复正常监听")
+                        return {'success': True, 'message': '模块重启成功'}
+                except Exception as e:
+                    logger.warning(f"[{modem.name}] 重连尝试 {attempt} 异常: {e}")
+
+                if attempt < max_retries:
+                    time.sleep(3)
+
+            logger.error(f"[{modem.name}] ❌ 模块重启后重连失败（已尝试 {max_retries} 次）")
+            return {'success': False, 'error': '模块重启后重连超时'}
+
+        except Exception as e:
+            logger.error(f"[{modem.name}] 重启模块异常: {type(e).__name__}: {e}")
+            return {'success': False, 'error': f'重启异常: {str(e)}'}
+
     def disable_modem(self, module_id):
-        """禁用模块"""
+        """禁用模块（从管理列表和配置文件中移除）"""
         with self._lock:
             modem = self._modems.get(module_id)
             if modem:
@@ -711,6 +863,8 @@ class ModemManager:
                 modem.disconnect()
                 del self._modems[module_id]
                 self._delete_modem_from_db(module_id)
+                self._save_modem_config()
+                logger.info(f"[{modem.name}] 模块已移除并持久化")
 
     def send_sms(self, module_id, phone, content):
         """通过指定模块发送短信"""
@@ -902,3 +1056,70 @@ class ModemManager:
                 'online': online,
                 'offline': offline,
             }
+
+    # ---- 模块配置持久化 (modem_config.json) ----
+
+    def _load_modem_config(self):
+        """从 config/modem_config.json 加载模块配置"""
+        try:
+            if os.path.exists(self.MODEM_CONFIG_FILE):
+                with open(self.MODEM_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                modems = data.get('modems', [])
+                logger.info(f"从 modem_config.json 加载了 {len(modems)} 个模块配置")
+                return modems
+            else:
+                logger.info("modem_config.json 不存在，将创建新文件")
+                return []
+        except json.JSONDecodeError as e:
+            logger.error(f"modem_config.json 解析错误: {e}，使用空配置")
+            return []
+        except Exception as e:
+            logger.error(f"读取 modem_config.json 异常: {e}")
+            return []
+
+    def _save_modem_config(self):
+        """保存所有已添加模块的配置到 config/modem_config.json（立即保存）"""
+        try:
+            with self._lock:
+                modems_list = []
+                for modem in self._modems.values():
+                    modems_list.append({
+                        'port': modem.port,
+                        'baudrate': modem.baudrate,
+                        'remark': modem.name,
+                    })
+
+            data = {'modems': modems_list}
+            os.makedirs(os.path.dirname(self.MODEM_CONFIG_FILE), exist_ok=True)
+            tmp_path = self.MODEM_CONFIG_FILE + '.tmp'
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, self.MODEM_CONFIG_FILE)
+            logger.debug(f"模块配置已保存到 {self.MODEM_CONFIG_FILE} ({len(modems_list)} 个模块)")
+        except Exception as e:
+            logger.error(f"保存模块配置异常: {e}")
+
+    def load_and_connect_saved_modems(self):
+        """启动时从 modem_config.json 读取并自动连接所有已保存的模块"""
+        saved_modems = self._load_modem_config()
+        if not saved_modems:
+            logger.info("modem_config.json 中无已保存模块，跳过自动连接")
+            return
+
+        logger.info(f"开始自动连接 {len(saved_modems)} 个已保存模块...")
+        for item in saved_modems:
+            port = item.get('port', '')
+            baudrate = item.get('baudrate', 115200)
+            remark = item.get('remark', '')
+            if not port:
+                continue
+
+            try:
+                logger.info(f"自动连接已保存模块: {port} (备注: {remark})")
+                instance = self.try_connect_port(port, baudrate)
+                if instance and remark:
+                    self.update_modem_name(instance.module_id, remark)
+            except Exception as e:
+                logger.error(f"自动连接模块 {port} 异常: {type(e).__name__}: {e}")
+                continue

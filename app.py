@@ -463,6 +463,15 @@ def api_reconnect_modem(module_id):
     return jsonify({'success': success})
 
 
+@app.route('/api/modems/<module_id>/restart', methods=['POST'])
+@login_required
+@api_error_handler
+def api_restart_modem(module_id):
+    """API: 软重启模块 (AT+CFUN=1,1)"""
+    result = modem_manager.restart_modem(module_id)
+    return jsonify(result)
+
+
 @app.route('/api/modems/<module_id>', methods=['PUT'])
 @login_required
 @api_error_handler
@@ -538,8 +547,8 @@ def api_exec_at():
     if not module_id or not command:
         return jsonify({'success': False, 'error': '参数不完整'})
 
-    # 安全检查：防止危险AT指令
-    dangerous_commands = ['AT+CFUN=0', 'AT+CFUN=4', 'AT+CFUN=1,1', 'AT+QPOWD']
+    # 安全检查：防止危险AT指令（但允许通过 /api/modems/<id>/restart 发起的 CFUN=1,1）
+    dangerous_commands = ['AT+CFUN=0', 'AT+CFUN=4', 'AT+QPOWD']
     if any(command.upper().replace(' ', '').startswith(d.replace(' ', '')) for d in dangerous_commands):
         return jsonify({'success': False, 'error': '该指令已被限制执行（可能导致模块关机或重启）'})
 
@@ -898,9 +907,9 @@ def init_app():
         db.create_all()
         logger.info("数据库表已初始化")
 
-        # 恢复数据库中的模块（不自动扫描，用户手动添加）
+        # 从 modem_config.json 恢复并自动连接所有已保存的模块
         try:
-            modem_manager.restore_from_db()
+            modem_manager.load_and_connect_saved_modems()
         except Exception as e:
             logger.error(f"模块恢复异常（不影响 Web 服务）: {type(e).__name__}: {e}")
 
