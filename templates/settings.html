@@ -9,36 +9,37 @@
             <h5 class="mb-3"><i class="fas fa-plug"></i> 串口设置</h5>
             <div class="mb-2">
                 <label class="form-label small">默认串口</label>
-                <input class="form-control form-control-sm" id="serialPort" value="{{ config.serial.default_port }}">
+                <input class="form-control form-control-sm" id="serialPort" value="{{ config.get('serial', {}).get('default_port', '/dev/ttyUSB2') }}">
             </div>
             <div class="mb-2">
                 <label class="form-label small">波特率</label>
                 <select class="form-select form-select-sm" id="serialBaudrate">
-                    <option value="9600" {% if config.serial.baudrate == 9600 %}selected{% endif %}>9600</option>
-                    <option value="19200" {% if config.serial.baudrate == 19200 %}selected{% endif %}>19200</option>
-                    <option value="38400" {% if config.serial.baudrate == 38400 %}selected{% endif %}>38400</option>
-                    <option value="57600" {% if config.serial.baudrate == 57600 %}selected{% endif %}>57600</option>
-                    <option value="115200" {% if config.serial.baudrate == 115200 %}selected{% endif %}>115200</option>
-                    <option value="230400" {% if config.serial.baudrate == 230400 %}selected{% endif %}>230400</option>
-                    <option value="460800" {% if config.serial.baudrate == 460800 %}selected{% endif %}>460800</option>
+                    {% set baudrate = config.get('serial', {}).get('baudrate', 115200) %}
+                    <option value="9600" {% if baudrate == 9600 %}selected{% endif %}>9600</option>
+                    <option value="19200" {% if baudrate == 19200 %}selected{% endif %}>19200</option>
+                    <option value="38400" {% if baudrate == 38400 %}selected{% endif %}>38400</option>
+                    <option value="57600" {% if baudrate == 57600 %}selected{% endif %}>57600</option>
+                    <option value="115200" {% if baudrate == 115200 %}selected{% endif %}>115200</option>
+                    <option value="230400" {% if baudrate == 230400 %}selected{% endif %}>230400</option>
+                    <option value="460800" {% if baudrate == 460800 %}selected{% endif %}>460800</option>
                 </select>
             </div>
             <div class="row g-2 mb-2">
                 <div class="col-4">
                     <label class="form-label small">超时(秒)</label>
-                    <input class="form-control form-control-sm" type="number" id="serialTimeout" value="{{ config.serial.timeout }}" step="0.5">
+                    <input class="form-control form-control-sm" type="number" id="serialTimeout" value="{{ config.get('serial', {}).get('timeout', 3) }}" step="0.5">
                 </div>
                 <div class="col-4">
                     <label class="form-label small">写入超时</label>
-                    <input class="form-control form-control-sm" type="number" id="serialWriteTimeout" value="{{ config.serial.write_timeout }}" step="0.5">
+                    <input class="form-control form-control-sm" type="number" id="serialWriteTimeout" value="{{ config.get('serial', {}).get('write_timeout', 3) }}" step="0.5">
                 </div>
                 <div class="col-4">
                     <label class="form-label small">重连间隔(秒)</label>
-                    <input class="form-control form-control-sm" type="number" id="reconnectInterval" value="{{ config.serial.reconnect_interval }}">
+                    <input class="form-control form-control-sm" type="number" id="reconnectInterval" value="{{ config.get('serial', {}).get('reconnect_interval', 10) }}">
                 </div>
             </div>
             <div class="form-check form-switch mb-2">
-                <input class="form-check-input" type="checkbox" id="autoReconnect" {% if config.serial.auto_reconnect %}checked{% endif %}>
+                <input class="form-check-input" type="checkbox" id="autoReconnect" {% if config.get('serial', {}).get('auto_reconnect', True) %}checked{% endif %}>
                 <label class="form-check-label">启用自动重连</label>
             </div>
             <button class="btn btn-primary btn-sm" onclick="saveSerialSettings()"><i class="fas fa-save"></i> 保存串口设置</button>
@@ -51,21 +52,21 @@
             <div class="row g-2 mb-2">
                 <div class="col-6">
                     <label class="form-label small">同步间隔(秒)</label>
-                    <input class="form-control form-control-sm" type="number" id="syncInterval" value="{{ config.sms.sync_interval }}">
+                    <input class="form-control form-control-sm" type="number" id="syncInterval" value="{{ config.get('sms', {}).get('sync_interval', 30) }}">
                 </div>
                 <div class="col-6">
                     <label class="form-label small">每页显示条数</label>
-                    <input class="form-control form-control-sm" type="number" id="pageSize" value="{{ config.sms.page_size }}">
+                    <input class="form-control form-control-sm" type="number" id="pageSize" value="{{ config.get('sms', {}).get('page_size', 20) }}">
                 </div>
             </div>
             <div class="row g-2 mb-2">
                 <div class="col-6">
                     <label class="form-label small">最大保留条数</label>
-                    <input class="form-control form-control-sm" type="number" id="maxRecords" value="{{ config.sms.max_records }}">
+                    <input class="form-control form-control-sm" type="number" id="maxRecords" value="{{ config.get('sms', {}).get('max_records', 100000) }}">
                 </div>
                 <div class="col-6">
                     <label class="form-label small">自动删除(天,0=不删)</label>
-                    <input class="form-control form-control-sm" type="number" id="autoDeleteDays" value="{{ config.sms.auto_delete_days }}">
+                    <input class="form-control form-control-sm" type="number" id="autoDeleteDays" value="{{ config.get('sms', {}).get('auto_delete_days', 0) }}">
                 </div>
             </div>
             <button class="btn btn-primary btn-sm" onclick="saveSMSSettings()"><i class="fas fa-save"></i> 保存短信设置</button>
@@ -77,15 +78,16 @@
                 <div class="col-6">
                     <label class="form-label small">日志级别</label>
                     <select class="form-select form-select-sm" id="logLevel">
-                        <option value="DEBUG" {% if config.logging.level == 'DEBUG' %}selected{% endif %}>DEBUG</option>
-                        <option value="INFO" {% if config.logging.level == 'INFO' %}selected{% endif %}>INFO</option>
-                        <option value="WARNING" {% if config.logging.level == 'WARNING' %}selected{% endif %}>WARNING</option>
-                        <option value="ERROR" {% if config.logging.level == 'ERROR' %}selected{% endif %}>ERROR</option>
+                        {% set log_level = config.get('logging', {}).get('level', 'INFO') %}
+                        <option value="DEBUG" {% if log_level == 'DEBUG' %}selected{% endif %}>DEBUG</option>
+                        <option value="INFO" {% if log_level == 'INFO' %}selected{% endif %}>INFO</option>
+                        <option value="WARNING" {% if log_level == 'WARNING' %}selected{% endif %}>WARNING</option>
+                        <option value="ERROR" {% if log_level == 'ERROR' %}selected{% endif %}>ERROR</option>
                     </select>
                 </div>
                 <div class="col-6">
                     <label class="form-label small">日志大小(MB)</label>
-                    <input class="form-control form-control-sm" type="number" id="logSize" value="{{ config.logging.max_size_mb }}">
+                    <input class="form-control form-control-sm" type="number" id="logSize" value="{{ config.get('logging', {}).get('max_size_mb', 10) }}">
                 </div>
             </div>
             <button class="btn btn-primary btn-sm" onclick="saveLogSettings()"><i class="fas fa-save"></i> 保存日志设置</button>

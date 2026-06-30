@@ -407,7 +407,12 @@ def api_test_mail():
 @login_required
 def settings_page():
     """系统设置页面"""
-    return render_template('settings.html', config=config_manager.config)
+    cfg = config_manager.config
+    # 确保顶层 key 存在，防止模板渲染崩溃
+    for key in ['serial', 'sms', 'logging']:
+        if key not in cfg:
+            cfg[key] = {}
+    return render_template('settings.html', config=cfg)
 
 
 @app.route('/api/settings', methods=['GET'])

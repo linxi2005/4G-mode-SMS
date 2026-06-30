@@ -504,18 +504,19 @@ class ModemInstance:
 class ModemManager:
     """多模块管理器 - 全局单例"""
 
-    MODEM_CONFIG_FILE = os.path.join('config', 'modem_config.json')
-
     def __init__(self, config_manager, db_session_factory=None):
         self.config_manager = config_manager
         self.db_session_factory = db_session_factory
         self._modems = {}  # module_id -> ModemInstance
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # 可重入锁，避免同一线程在 _save_modem_config 中死锁
         self._sms_callbacks = []
         self._monitor_thread = None
         self._stop_event = threading.Event()
+        # 使用 ConfigManager 的 config_dir，确保路径一致
+        self._config_dir = getattr(config_manager, 'config_dir', 'config')
+        self._modem_config_file = os.path.join(self._config_dir, 'modem_config.json')
         # 确保 config 目录存在
-        os.makedirs('config', exist_ok=True)
+        os.makedirs(self._config_dir, exist_ok=True)
 
     def add_sms_callback(self, callback):
         """添加全局短信接收回调"""
@@ -682,7 +683,7 @@ class ModemManager:
         instance.start_listening()
         self._save_modem_to_db(instance)
         self._save_modem_config()
-        logger.info(f"模块配置已持久化到 {self.MODEM_CONFIG_FILE}")
+        logger.info(f"模块配置已持久化到 {self._modem_config_file}")
 
         return instance
 
@@ -1062,25 +1063,30 @@ class ModemManager:
     def _load_modem_config(self):
         """从 config/modem_config.json 加载模块配置"""
         try:
-            if os.path.exists(self.MODEM_CONFIG_FILE):
-                with open(self.MODEM_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            if os.path.exists(self._modem_config_file):
+                with open(self._modem_config_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 modems = data.get('modems', [])
-                logger.info(f"从 modem_config.json 加载了 {len(modems)} 个模块配置")
+                logger.info(f"从 {self._modem_config_file} 加载了 {len(modems)} 个模块配置")
                 return modems
             else:
-                logger.info("modem_config.json 不存在，将创建新文件")
+                logger.info(f"{self._modem_config_file} 不存在，将创建新文件")
                 return []
         except json.JSONDecodeError as e:
-            logger.error(f"modem_config.json 解析错误: {e}，使用空配置")
+            logger.error(f"{self._modem_config_file} 解析错误: {e}，使用空配置")
             return []
         except Exception as e:
-            logger.error(f"读取 modem_config.json 异常: {e}")
+            logger.error(f"读取 {self._modem_config_file} 异常: {e}")
             return []
 
     def _save_modem_config(self):
-        """保存所有已添加模块的配置到 config/modem_config.json（立即保存）"""
+        """保存所有已添加模块的配置到 config/modem_config.json（立即保存）
+        
+        注意: 调用方可能已持有 self._lock，因此这里不额外加锁（RLock 可重入，
+        但快照式读取后写文件不应阻塞持有锁时的其他操作）。
+        """
         try:
+            # 快照当前模块列表（在锁外读取，由调用方保证一致性）
             with self._lock:
                 modems_list = []
                 for modem in self._modems.values():
@@ -1091,12 +1097,13 @@ class ModemManager:
                     })
 
             data = {'modems': modems_list}
-            os.makedirs(os.path.dirname(self.MODEM_CONFIG_FILE), exist_ok=True)
-            tmp_path = self.MODEM_CONFIG_FILE + '.tmp'
+            config_dir = os.path.dirname(self._modem_config_file)
+            os.makedirs(config_dir, exist_ok=True)
+            tmp_path = self._modem_config_file + '.tmp'
             with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            os.replace(tmp_path, self.MODEM_CONFIG_FILE)
-            logger.debug(f"模块配置已保存到 {self.MODEM_CONFIG_FILE} ({len(modems_list)} 个模块)")
+            os.replace(tmp_path, self._modem_config_file)
+            logger.debug(f"模块配置已保存到 {self._modem_config_file} ({len(modems_list)} 个模块)")
         except Exception as e:
             logger.error(f"保存模块配置异常: {e}")
 
