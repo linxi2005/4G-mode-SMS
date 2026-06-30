@@ -2,7 +2,7 @@
 
 > *"你的验证码，我来送！"* — 某不知名 4G 模块留
 
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.7+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Flask](https://img.shields.io/badge/Flask-3.x-000000?style=for-the-badge&logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
 [![SQLite](https://img.shields.io/badge/SQLite-3-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://sqlite.org)
 [![Bootstrap](https://img.shields.io/badge/Bootstrap-5.3-7952B3?style=for-the-badge&logo=bootstrap&logoColor=white)](https://getbootstrap.com)
@@ -48,12 +48,12 @@
 | 🖥️ Web 后台管理 | ✅ | 颜值即正义 |
 | 🌙 深色/浅色模式 | ✅ | 深夜党福音 |
 | 📱 响应式手机访问 | ✅ | 马桶上也能管理 |
-| 🔌 多模块管理 | ✅ | USB 不够用？插满！ |
+| 🔌 手动添加模块 | ✅ | 手动设置串口和备注，精准控制 |
 | 🧩 AT 驱动适配层 | ✅ | 管你移远还是华为 |
 | 🛠️ AT 调试终端 | ✅ | 在线敲 AT，比串口助手香 |
-| 💾 SQLite 数据库 | ✅ | 十万条短信不卡顿 |
+| 💾 数据库导入/导出 | ✅ | 一键备份，搬家无忧 |
 | 🔐 Web 登录认证 | ✅ | 不是谁都能偷看的 |
-| 📊 Chart.js 统计图表 | ✅ | 数据可视化，老板最爱 |
+| 📊 快捷操作面板 | ✅ | 首页快捷入口，一键直达 |
 | 🔔 WebSocket 实时推送 | ✅ | 短信到了，页面秒弹 |
 | 📤 导出 JSON/CSV | ✅ | 数据在手天下我有 |
 | 🔁 自动重连 | ✅ | 断线？不存在 |
@@ -86,8 +86,8 @@
 
 | 项目 | 最低配置 | 推荐配置 | 备注 |
 |------|----------|----------|------|
-| 🐍 Python | 3.8+ | 3.11+ | 兼容 3.8~3.12 |
-| 🐧 OS | Any Linux | Debian/Ubuntu | ARMv7 海思平台也可 |
+| 🐍 Python | 3.7+ | 3.11+ | 兼容 3.7~3.12, ARMv7/amd64/arm64/Windows |
+| 🐧 OS | Any Linux | Debian/Ubuntu | ARMv7 海思平台也可, 支持 Windows |
 | 🧠 RAM | 512MB | 1GB+ | 树莓派 Zero 都够 |
 | 💿 磁盘 | 100MB | 1GB+ | 留给短信的「别墅」 |
 | 📡 4G 模块 | 1 个 | N 个 | EC20 淘宝 40 块包邮 |

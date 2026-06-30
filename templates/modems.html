@@ -3,9 +3,8 @@
 {% block page_title %}<h5 class="mb-0"><i class="fas fa-microchip"></i> 模块管理</h5>{% endblock %}
 {% block content %}
 
-<div class="mb-3">
-    <button class="btn btn-primary btn-sm" onclick="scanPorts()"><i class="fas fa-search"></i> 扫描串口</button>
-    <button class="btn btn-success btn-sm" onclick="discoverModems()"><i class="fas fa-plug"></i> 自动发现</button>
+<div class="mb-3 d-flex gap-2">
+    <button class="btn btn-primary btn-sm" onclick="showAddModal()"><i class="fas fa-plus"></i> 添加模块</button>
     <button class="btn btn-outline-secondary btn-sm" onclick="refreshModems()"><i class="fas fa-sync"></i> 刷新</button>
 </div>
 
@@ -30,6 +29,41 @@
     </div>
 </div>
 
+<!-- 添加模块模态框 -->
+<div class="modal fade" id="addModemModal">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title"><i class="fas fa-plus-circle"></i> 添加模块</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">串口路径 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="addPortInput" placeholder="例如: /dev/ttyUSB2 或 COM3">
+                    <small class="text-muted">Linux: /dev/ttyUSB2, Windows: COM3</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">波特率</label>
+                    <select class="form-select" id="addBaudrateInput">
+                        <option value="115200" selected>115200 (推荐)</option>
+                        <option value="9600">9600</option>
+                        <option value="57600">57600</option>
+                        <option value="230400">230400</option>
+                        <option value="460800">460800</option>
+                        <option value="921600">921600</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">模块备注</label>
+                    <input type="text" class="form-control" id="addNameInput" placeholder="例如: 主卡-EC20">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button class="btn btn-primary" onclick="addModem()"><i class="fas fa-plus"></i> 添加并连接</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 {% block extra_scripts %}
 <script>
@@ -37,7 +71,7 @@ function loadModems() {
     fetch('/api/modems').then(r => r.json()).then(modems => {
         const container = document.getElementById('modemCards');
         if (modems.length === 0) {
-            container.innerHTML = '<div class="col-12 text-center text-muted py-5"><i class="fas fa-satellite-dish fa-3x mb-2"></i><p>没有发现模块，请点击"扫描串口"或"自动发现"</p></div>';
+            container.innerHTML = '<div class="col-12 text-center text-muted py-5"><i class="fas fa-satellite-dish fa-3x mb-2"></i><p>暂无模块，请点击"添加模块"手动添加</p></div>';
             return;
         }
         container.innerHTML = modems.map(m => `
@@ -103,18 +137,36 @@ async function removeModem(moduleId) {
     showToast('模块已移除', 'info');
 }
 
-async function scanPorts() {
-    const resp = await fetch('/api/modems/scan', {method:'POST'});
-    const data = await resp.json();
-    showToast(`发现 ${data.ports.length} 个串口: ${data.ports.join(', ') || '无'}`, 'info');
+function showAddModal() {
+    new bootstrap.Modal(document.getElementById('addModemModal')).show();
 }
 
-async function discoverModems() {
-    showToast('正在自动发现模块...', 'info');
-    const resp = await fetch('/api/modems/discover', {method:'POST'});
+async function addModem() {
+    const port = document.getElementById('addPortInput').value.trim();
+    const baudrate = parseInt(document.getElementById('addBaudrateInput').value) || 115200;
+    const name = document.getElementById('addNameInput').value.trim();
+
+    if (!port) {
+        showToast('请输入串口路径', 'error');
+        return;
+    }
+
+    showToast('正在连接模块...', 'info');
+    const resp = await fetch('/api/modems/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({port, baudrate, name})
+    });
     const data = await resp.json();
-    showToast(`成功连接 ${data.length} 个模块`, 'success');
-    loadModems();
+    if (data.success) {
+        showToast('模块添加成功', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('addModemModal')).hide();
+        document.getElementById('addPortInput').value = '';
+        document.getElementById('addNameInput').value = '';
+        loadModems();
+    } else {
+        showToast('添加失败: ' + (data.error || '未知错误'), 'error');
+    }
 }
 
 function refreshModems() { loadModems(); }

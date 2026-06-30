@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # app.py - 4G短信转发系统主应用
-"""4G短信转发系统 - 主应用入口"""
+"""4G短信转发系统 - 主应用入口
+
+支持平台: Linux (amd64/arm64/armv7), Windows (amd64)
+Python: 3.7+
+"""
 import os
 import sys
 import json
@@ -8,6 +12,7 @@ import time
 import signal
 import hashlib
 import logging
+import platform
 import threading
 from datetime import datetime, timezone
 from functools import wraps
@@ -16,7 +21,14 @@ from flask import (
     Flask, render_template, request, jsonify, redirect,
     url_for, session, send_file, Response
 )
-import psutil
+
+# psutil 在 Windows/armv7 上可能有问题，做兼容处理
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+    psutil = None
 
 # Flask-SocketIO 可选（ARM/Linux 环境可能装不上）
 try:
@@ -170,26 +182,37 @@ def index():
     modem_stats = modem_manager.get_statistics()
     sms_stats = sms_engine.get_statistics()
 
-    # 系统资源
-    cpu_percent = psutil.cpu_percent(interval=0.5)
-    memory = psutil.virtual_memory()
-    disk = psutil.disk_usage('/')
+    # 系统资源（兼容无 psutil 的环境）
+    if HAS_PSUTIL:
+        cpu_percent = psutil.cpu_percent(interval=0.5)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        stats = {
+            'cpu': cpu_percent,
+            'memory_percent': memory.percent,
+            'memory_used': format_bytes(memory.used),
+            'memory_total': format_bytes(memory.total),
+            'disk_percent': disk.percent,
+            'disk_used': format_bytes(disk.used),
+            'disk_total': format_bytes(disk.total),
+        }
+    else:
+        stats = {
+            'cpu': 'N/A',
+            'memory_percent': 'N/A',
+            'memory_used': 'N/A',
+            'memory_total': 'N/A',
+            'disk_percent': 'N/A',
+            'disk_used': 'N/A',
+            'disk_total': 'N/A',
+        }
 
     # 运行时间
     uptime = datetime.now(timezone.utc) - START_TIME
     uptime_str = str(uptime).split('.')[0]
 
-    stats = {
-        'cpu': cpu_percent,
-        'memory_percent': memory.percent,
-        'memory_used': format_bytes(memory.used),
-        'memory_total': format_bytes(memory.total),
-        'disk_percent': disk.percent,
-        'disk_used': format_bytes(disk.used),
-        'disk_total': format_bytes(disk.total),
-        'uptime': uptime_str,
-        'version': config_manager.app_version,
-    }
+    stats['uptime'] = uptime_str
+    stats['version'] = config_manager.app_version
 
     return render_template('index.html',
                            modems=modem_manager.get_all_modems(),
@@ -461,13 +484,28 @@ def api_delete_modem(module_id):
     return jsonify({'success': True})
 
 
-@app.route('/api/modems/scan', methods=['POST'])
+@app.route('/api/modems/add', methods=['POST'])
 @login_required
 @api_error_handler
-def api_scan_modems():
-    """API: 扫描串口"""
-    ports = modem_manager.scan_ports()
-    return jsonify({'ports': ports})
+def api_add_modem():
+    """API: 手动添加模块"""
+    data = request.get_json()
+    port = data.get('port', '')
+    baudrate = data.get('baudrate', 115200)
+    name = data.get('name', '')
+
+    if not port:
+        return jsonify({'success': False, 'error': '串口路径不能为空'})
+
+    # Windows 下路径处理: COM3, COM10 等
+    # Linux 下: /dev/ttyUSB2, /dev/ttyACM0 等
+    instance = modem_manager.try_connect_port(port, baudrate)
+    if instance:
+        if name:
+            modem_manager.update_modem_name(instance.module_id, name)
+        return jsonify({'success': True, 'module': instance.to_dict()})
+    else:
+        return jsonify({'success': False, 'error': f'无法连接端口 {port}，请检查串口是否存在且为AT口'})
 
 
 @app.route('/api/modems/discover', methods=['POST'])
@@ -686,6 +724,67 @@ def api_restore():
     return jsonify({'success': True})
 
 
+@app.route('/api/database/export')
+@login_required
+@api_error_handler
+def api_export_database():
+    """API: 导出数据库文件"""
+    db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    if db_uri.startswith('sqlite:///'):
+        db_file = db_uri.replace('sqlite:///', '')
+        if os.path.exists(db_file):
+            return send_file(
+                db_file,
+                as_attachment=True,
+                download_name=f'sms_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db',
+                mimetype='application/octet-stream'
+            )
+    return jsonify({'error': '数据库文件不存在'}), 404
+
+
+@app.route('/api/database/import', methods=['POST'])
+@login_required
+@api_error_handler
+def api_import_database():
+    """API: 导入数据库文件"""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': '未上传文件'})
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': '未选择文件'})
+
+    if not file.filename.endswith(('.db', '.sqlite', '.bak')):
+        return jsonify({'success': False, 'error': '文件格式不正确，仅支持 .db/.sqlite/.bak 文件'})
+
+    try:
+        db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+        if not db_uri.startswith('sqlite:///'):
+            return jsonify({'success': False, 'error': '当前数据库不是SQLite'})
+
+        db_file = db_uri.replace('sqlite:///', '')
+
+        # 先备份当前数据库
+        backup_path = db_manager.backup_database()
+
+        # 写入新文件
+        file.save(db_file)
+
+        # 验证完整性
+        if not db_manager.check_integrity():
+            # 恢复备份
+            if backup_path and os.path.exists(backup_path):
+                import shutil
+                shutil.copy2(backup_path, db_file)
+            return jsonify({'success': False, 'error': '导入的数据库文件损坏（完整性检查失败），已恢复原数据库'})
+
+        logger.info(f"数据库已从上传文件导入: {file.filename}")
+        return jsonify({'success': True, 'message': '数据库导入成功'})
+    except Exception as e:
+        logger.error(f"导入数据库失败: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
 # ---- 系统统计 ----
 
 @app.route('/api/stats')
@@ -693,20 +792,35 @@ def api_restore():
 @api_error_handler
 def api_stats():
     """API: 获取系统统计"""
-    cpu = psutil.cpu_percent(interval=0.1)
-    memory = psutil.virtual_memory()
-    disk = psutil.disk_usage('/')
+    if HAS_PSUTIL:
+        cpu = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        mem_used = format_bytes(memory.used)
+        mem_total = format_bytes(memory.total)
+        mem_percent = memory.percent
+        disk_used = format_bytes(disk.used)
+        disk_total = format_bytes(disk.total)
+        disk_percent = disk.percent
+    else:
+        cpu = 0
+        mem_used = 'N/A'
+        mem_total = 'N/A'
+        mem_percent = 0
+        disk_used = 'N/A'
+        disk_total = 'N/A'
+        disk_percent = 0
 
     uptime = datetime.now(timezone.utc) - START_TIME
 
     return jsonify({
         'cpu_percent': cpu,
-        'memory_percent': memory.percent,
-        'memory_used': format_bytes(memory.used),
-        'memory_total': format_bytes(memory.total),
-        'disk_percent': disk.percent,
-        'disk_used': format_bytes(disk.used),
-        'disk_total': format_bytes(disk.total),
+        'memory_percent': mem_percent,
+        'memory_used': mem_used,
+        'memory_total': mem_total,
+        'disk_percent': disk_percent,
+        'disk_used': disk_used,
+        'disk_total': disk_total,
         'uptime': str(uptime).split('.')[0],
         'version': config_manager.app_version,
         'sms_stats': sms_engine.get_statistics(),
@@ -784,11 +898,11 @@ def init_app():
         db.create_all()
         logger.info("数据库表已初始化")
 
-        # 自动发现模块（异常不影响启动）
+        # 恢复数据库中的模块（不自动扫描，用户手动添加）
         try:
-            modem_manager.auto_discover()
+            modem_manager.restore_from_db()
         except Exception as e:
-            logger.error(f"模块自动发现异常（不影响 Web 服务）: {type(e).__name__}: {e}")
+            logger.error(f"模块恢复异常（不影响 Web 服务）: {type(e).__name__}: {e}")
 
         # 启动短信同步服务
         sms_engine.start_sync_service()

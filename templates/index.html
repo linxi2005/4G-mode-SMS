@@ -108,69 +108,53 @@
     </div>
 </div>
 
-<!-- 资源图表 -->
+<!-- 快捷操作 -->
 <div class="row g-3 mt-3">
-    <div class="col-md-6">
+    <div class="col-12">
         <div class="card p-3">
-            <h6><i class="fas fa-chart-line"></i> 系统资源</h6>
-            <canvas id="resourceChart" height="150"></canvas>
-        </div>
-    </div>
-    <div class="col-md-6">
-        <div class="card p-3">
-            <h6><i class="fas fa-chart-bar"></i> 短信统计</h6>
-            <canvas id="smsChart" height="150"></canvas>
+            <h6 class="mb-3"><i class="fas fa-bolt"></i> 快捷操作</h6>
+            <div class="row g-2">
+                <div class="col-6 col-sm-4 col-md-2">
+                    <a href="/modems" class="btn btn-outline-primary w-100 py-3 d-flex flex-column align-items-center gap-1">
+                        <i class="fas fa-sync-alt fa-lg"></i>
+                        <small>重启模块</small>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-md-2">
+                    <a href="/modems" class="btn btn-outline-warning w-100 py-3 d-flex flex-column align-items-center gap-1">
+                        <i class="fas fa-plug fa-lg"></i>
+                        <small>重连串口</small>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-md-2">
+                    <a href="/send" class="btn btn-outline-success w-100 py-3 d-flex flex-column align-items-center gap-1">
+                        <i class="fas fa-paper-plane fa-lg"></i>
+                        <small>发送短信</small>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-md-2">
+                    <a href="/at" class="btn btn-outline-info w-100 py-3 d-flex flex-column align-items-center gap-1">
+                        <i class="fas fa-terminal fa-lg"></i>
+                        <small>AT 命令</small>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-md-2">
+                    <a href="/sms" class="btn btn-outline-secondary w-100 py-3 d-flex flex-column align-items-center gap-1">
+                        <i class="fas fa-envelope fa-lg"></i>
+                        <small>查看短信</small>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-md-2">
+                    <a href="/mail" class="btn btn-outline-danger w-100 py-3 d-flex flex-column align-items-center gap-1">
+                        <i class="fas fa-cog fa-lg"></i>
+                        <small>邮件设置</small>
+                    </a>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
 {% endblock %}
 {% block extra_scripts %}
-<script>
-// 资源图表
-const resCtx = document.getElementById('resourceChart').getContext('2d');
-const resourceChart = new Chart(resCtx, {
-    type: 'line',
-    data: {
-        labels: [],
-        datasets: [
-            { label: 'CPU %', borderColor: '#3498db', data: [], tension: 0.3, fill: false },
-            { label: '内存 %', borderColor: '#e74c3c', data: [], tension: 0.3, fill: false }
-        ]
-    },
-    options: { responsive: true, maintainAspectRatio: false,
-        scales: { y: { beginAtZero: true, max: 100 } }
-    }
-});
-
-// 短信图表
-const smsCtx = document.getElementById('smsChart').getContext('2d');
-const smsChart = new Chart(smsCtx, {
-    type: 'doughnut',
-    data: {
-        labels: ['已转发', '未转发'],
-        datasets: [{
-            data: [{{ sms_stats.total_forwarded }}, {{ sms_stats.total_sms - sms_stats.total_forwarded }}],
-            backgroundColor: ['#2ecc71', '#e74c3c']
-        }]
-    },
-    options: { responsive: true, maintainAspectRatio: false }
-});
-
-// 定时刷新
-setInterval(() => {
-    fetch('/api/stats').then(r => r.json()).then(data => {
-        const now = new Date().toLocaleTimeString();
-        resourceChart.data.labels.push(now);
-        resourceChart.data.datasets[0].data.push(data.cpu_percent);
-        resourceChart.data.datasets[1].data.push(data.memory_percent);
-        if (resourceChart.data.labels.length > 20) {
-            resourceChart.data.labels.shift();
-            resourceChart.data.datasets[0].data.shift();
-            resourceChart.data.datasets[1].data.shift();
-        }
-        resourceChart.update();
-    });
-}, 5000);
-</script>
 {% endblock %}

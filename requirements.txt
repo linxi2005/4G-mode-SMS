@@ -1,6 +1,11 @@
-Flask>=2.3,<3.1
-Flask-SQLAlchemy>=3.0,<3.2
-Flask-SocketIO>=5.3,<5.5
-Flask-WTF>=1.0,<1.3
+# 核心依赖（兼容 Python 3.7+ / armv7 / amd64 / arm64 / Windows）
+Flask>=2.0,<3.1
+Flask-SQLAlchemy>=2.5,<3.2
+Flask-SocketIO>=5.0,<5.5
+Flask-WTF>=0.15,<1.3
 pyserial>=3.4
 psutil>=5.0
+
+# 可选: 生产环境建议使用 gevent 提升 WebSocket 性能
+# gevent>=21.0; platform_system != 'Windows'
+# gevent-websocket>=0.10; platform_system != 'Windows'

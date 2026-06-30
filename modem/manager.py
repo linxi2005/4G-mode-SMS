@@ -5,6 +5,7 @@ import re
 import glob
 import uuid
 import time
+import platform
 import serial
 import threading
 import logging
@@ -445,7 +446,10 @@ class ModemManager:
                 logger.error(f"全局短信回调异常: {e}")
 
     def scan_ports(self):
-        """扫描所有可用串口（按优先级排序 + 忽略配置）"""
+        """扫描所有可用串口（按优先级排序 + 忽略配置）
+        
+        支持 Linux (/dev/ttyUSB*, /dev/ttyACM*) 和 Windows (COM*)
+        """
         serial_config = self.config_manager.serial_config
         scan_patterns = serial_config.get('scan_ports', ['/dev/ttyUSB*', '/dev/ttyACM*'])
         preferred = serial_config.get('preferred_ports', [
@@ -465,6 +469,17 @@ class ModemManager:
             except Exception as e:
                 logger.warning(f"扫描模式 {pattern} 异常: {type(e).__name__}: {e}")
 
+        # Windows 平台自动扫描 COM 端口
+        if platform.system() == 'Windows' and not found_set:
+            for i in range(1, 33):
+                com_port = f'COM{i}'
+                try:
+                    ser = serial.Serial(com_port)
+                    ser.close()
+                    found_set.add(com_port)
+                except (serial.SerialException, OSError):
+                    pass
+
         # 确保默认端口在列表中
         if default_port not in found_set and os.path.exists(default_port):
             found_set.add(default_port)
@@ -483,7 +498,7 @@ class ModemManager:
         logger.info(f"扫描到 {len(sorted_ports)} 个可用串口: {sorted_ports}")
         return sorted_ports
 
-    def try_connect_port(self, port, baudrate=115200):
+    def try_connect_port(self, port, baudrate=None):
         """尝试连接一个串口并识别是否为4G模块的AT口
 
         流程：
@@ -493,7 +508,9 @@ class ModemManager:
         4. 确认是真正的 AT 口后加入模块管理
         5. 任何步骤失败则跳过该端口，继续下一个
         """
-        logger.info(f"── 正在探测端口: {port} ──")
+        if baudrate is None:
+            baudrate = self.config_manager.serial_config.get('baudrate', 115200)
+        logger.info(f"── 正在探测端口: {port} (baudrate={baudrate}) ──")
 
         # 检查是否已被管理
         with self._lock:
@@ -852,6 +869,10 @@ class ModemManager:
             session.close()
         except Exception as e:
             logger.error(f"从数据库删除模块失败: {e}")
+
+    def restore_from_db(self):
+        """公开方法: 从数据库恢复模块信息"""
+        self._restore_from_db()
 
     def _restore_from_db(self):
         """从数据库恢复模块信息"""

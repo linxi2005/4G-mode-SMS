@@ -62,6 +62,19 @@
 
             <hr>
 
+            <h6><i class="fas fa-file-export"></i> 导入/导出</h6>
+            <div class="d-grid gap-2">
+                <button class="btn btn-outline-primary" onclick="exportDatabase()">
+                    <i class="fas fa-download"></i> 导出数据库
+                </button>
+                <button class="btn btn-outline-secondary" onclick="document.getElementById('importFileInput').click()">
+                    <i class="fas fa-upload"></i> 导入数据库
+                </button>
+                <input type="file" id="importFileInput" accept=".db,.sqlite,.bak" style="display:none" onchange="importDatabase(this)">
+            </div>
+
+            <hr>
+
             <h6><i class="fas fa-trash-alt"></i> 数据清理</h6>
             <div class="row g-2 mb-2">
                 <div class="col-6">
@@ -135,6 +148,56 @@ async function cleanupByCount() {
     const data = await resp.json();
     showToast(data.success ? `已删除 ${data.deleted} 条短信` : '清理失败', data.success?'success':'error');
     if (data.success) setTimeout(() => location.reload(), 1000);
+}
+
+async function exportDatabase() {
+    showToast('正在导出数据库...', 'info');
+    try {
+        const resp = await fetch('/api/database/export');
+        if (!resp.ok) {
+            const err = await resp.json();
+            showToast('导出失败: ' + (err.error || '未知错误'), 'error');
+            return;
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `sms_backup_${new Date().toISOString().slice(0,10)}.db`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('数据库导出完成', 'success');
+    } catch (e) {
+        showToast('导出异常: ' + e.message, 'error');
+    }
+}
+
+async function importDatabase(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (!confirm(`确定要导入 "${file.name}" 吗？这将覆盖当前数据库！`)) {
+        input.value = '';
+        return;
+    }
+    showToast('正在导入数据库...', 'info');
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+        const resp = await fetch('/api/database/import', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('数据库导入成功，页面即将刷新', 'success');
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showToast('导入失败: ' + (data.error || '未知错误'), 'error');
+        }
+    } catch (e) {
+        showToast('导入异常: ' + e.message, 'error');
+    }
+    input.value = '';
 }
 </script>
 {% endblock %}
